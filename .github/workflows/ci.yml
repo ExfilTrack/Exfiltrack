@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop", "feature/**", "chore/**", "fix/**"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black mypy
+      - run: ruff check src/ tests/
+      - run: black --check src/ tests/
+      - run: mypy src/
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=exfiltrack --cov-report=term-missing

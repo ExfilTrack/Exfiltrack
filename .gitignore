@@ -1,0 +1,93 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# FORENSIC EVIDENCE - NEVER COMMIT REAL CASE DATA
+# ============================================================
+# Acquired evidence, case output directories, and anything that
+# could contain real file names, device history, or user data.
+evidence/
+cases/
+case_output/
+output/
+*.evtx
+*.lnk
+*.automaticDestinations-ms
+*.customDestinations-ms
+NTUSER.DAT*
+SYSTEM
+SOFTWARE
+SAM
+SECURITY
+*.hive
+*.E01
+*.raw
+*.dd
+*.vhd
+*.vhdx
+
+# Generated reports
+reports/
+*.report.html
+*.report.json
+*.report.csv
+
+# Local configuration and secrets
+.env
+.env.*
+*.local.toml
+local_config.*
+
+# Allow committed synthetic test fixtures
+!tests/fixtures/**
+!examples/synthetic/**

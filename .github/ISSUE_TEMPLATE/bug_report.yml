@@ -1,0 +1,51 @@
+name: Bug Report
+description: Report a defect in ExfilTrack's parsing, correlation, or reporting.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - evidence intake / hashing
+        - registry parser
+        - evtx parser
+        - lnk parser
+        - jumplist parser
+        - normalization
+        - correlation / scoring
+        - reporting
+        - cli
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Run `exfiltrack analyze --evidence ...`
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_note
+    attributes:
+      label: Evidence Note
+      description: >
+        Do NOT attach real case evidence. Attach only synthetic fixtures or
+        a minimal reproducible example with no real file names or device data.

@@ -1,0 +1,43 @@
+name: Feature Request
+description: Propose a new capability or improvement.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - evidence intake / hashing
+        - registry parser
+        - evtx parser
+        - lnk parser
+        - jumplist parser
+        - normalization
+        - correlation / scoring
+        - reporting
+        - cli
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What gap does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+    validations:
+      required: true
+  - type: textarea
+    id: forensic
+    attributes:
+      label: Forensic Soundness Considerations
+      description: >
+        Does this change affect evidence integrity, chain of custody, or the
+        accuracy of confidence levels? If so, describe how it will be handled.

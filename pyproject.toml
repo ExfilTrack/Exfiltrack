@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exfiltrack"
+version = "0.1.0"
+description = "A forensically sound USB exfiltration triage tool for offline Windows artifact analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Milindu Weerawarna" },
+    { name = "Thabrew D. C. L." },
+    { name = "Dabarera G. D. M. (Maheesha)" },
+]
+keywords = ["forensics", "usb", "exfiltration", "dfir", "windows-artifacts"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+
+dependencies = [
+    "python-registry==1.3.1",
+    "python-evtx==0.8.0",
+    "LnkParse3==1.4.0",
+    "Jinja2==3.1.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-cov==5.0.0",
+    "black==24.8.0",
+    "ruff==0.6.9",
+    "mypy==1.11.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/ExfilTrack/Exfiltrack"
+Repository = "https://github.com/ExfilTrack/Exfiltrack"
+Issues = "https://github.com/ExfilTrack/Exfiltrack/issues"
+
+[project.scripts]
+exfiltrack = "exfiltrack.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+exfiltrack = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "ARG", "PTH"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["exfiltrack"]
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast isolated tests",
+    "integration: end-to-end pipeline tests",
+    "requires_fixtures: needs synthetic evidence fixtures",
+]
+
+[tool.coverage.run]
+source = ["exfiltrack"]
+branch = true

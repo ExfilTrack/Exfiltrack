@@ -1,0 +1,15 @@
+# Development dependencies for ExfilTrack.
+# Runtime dependencies are declared in pyproject.toml.
+# Install everything with: pip install -e ".[dev]"
+
+# Testing
+pytest==8.3.3
+pytest-cov==5.0.0
+
+# Formatting and linting
+black==24.8.0
+ruff==0.6.9
+mypy==1.11.2
+
+# Build tooling
+build==1.2.2

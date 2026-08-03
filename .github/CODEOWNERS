@@ -1,0 +1,29 @@
+# CODEOWNERS for ExfilTrack
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything not matched below
+* @Milindu-Weerawarna
+
+# Evidence intake, hashing, manifest
+/src/exfiltrack/evidence/         @Milindu-Weerawarna
+/src/exfiltrack/parsers/registry_parser.py  @Milindu-Weerawarna
+/src/exfiltrack/config.py         @Milindu-Weerawarna
+/src/exfiltrack/cli.py            @Milindu-Weerawarna
+/docs/architecture.md             @Milindu-Weerawarna
+
+# EVTX, LNK, Jump List parsers, normalization
+/src/exfiltrack/parsers/evtx_parser.py      @Thabrew-DCL
+/src/exfiltrack/parsers/lnk_parser.py       @Thabrew-DCL
+/src/exfiltrack/parsers/jumplist_parser.py  @Thabrew-DCL
+/src/exfiltrack/normalization/              @Thabrew-DCL
+/docs/evidence-sources.md                   @Thabrew-DCL
+
+# Correlation, reporting, scoring
+/src/exfiltrack/correlation/      @Maheesha-GDM
+/src/exfiltrack/reporting/        @Maheesha-GDM
+/docs/scoring-model.md            @Maheesha-GDM
+/docs/user-guide.md               @Maheesha-GDM
+
+# Shared ownership
+/tests/                           @Milindu-Weerawarna @Thabrew-DCL @Maheesha-GDM
+/docs/limitations.md              @Milindu-Weerawarna @Thabrew-DCL @Maheesha-GDM
