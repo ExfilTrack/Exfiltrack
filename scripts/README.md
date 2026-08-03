@@ -20,15 +20,15 @@ Creates the label set, the 5 milestones, and all 14 tracking issues from `docs/t
 ./scripts/bootstrap_github.ps1           # apply
 ```
 
-**Before running, update the GitHub usernames at the top of the script:**
+**GitHub usernames are already configured at the top of the script:**
 
 ```powershell
-$UserMilindu  = "Milindu-Weerawarna"
-$UserThabrew  = "Thabrew-DCL"
-$UserMaheesha = "Maheesha-GDM"
+$UserMilindu  = "Milindu-Weerawarna"   # Weerawarna S.B.M.N.  230699E
+$UserThabrew  = "lakaThabrew"          # Thabrew D. C. L.     230631P
+$UserMaheesha = "maheesha23"           # Dabarera G.D.M.      230111X
 ```
 
-Those placeholders also appear in `.github/CODEOWNERS`, which must be updated to match or code owner review requests will silently fail.
+The same usernames appear in `.github/CODEOWNERS`. Keep the two in sync, or code owner review requests will silently fail.
 
 Issues are created in order, so they receive numbers #1 through #14 matching `docs/task-assignments.md`. Run this on a repository with no existing issues.
 

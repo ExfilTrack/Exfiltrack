@@ -12,18 +12,18 @@
 /docs/architecture.md             @Milindu-Weerawarna
 
 # EVTX, LNK, Jump List parsers, normalization
-/src/exfiltrack/parsers/evtx_parser.py      @Thabrew-DCL
-/src/exfiltrack/parsers/lnk_parser.py       @Thabrew-DCL
-/src/exfiltrack/parsers/jumplist_parser.py  @Thabrew-DCL
-/src/exfiltrack/normalization/              @Thabrew-DCL
-/docs/evidence-sources.md                   @Thabrew-DCL
+/src/exfiltrack/parsers/evtx_parser.py      @lakaThabrew
+/src/exfiltrack/parsers/lnk_parser.py       @lakaThabrew
+/src/exfiltrack/parsers/jumplist_parser.py  @lakaThabrew
+/src/exfiltrack/normalization/              @lakaThabrew
+/docs/evidence-sources.md                   @lakaThabrew
 
 # Correlation, reporting, scoring
-/src/exfiltrack/correlation/      @Maheesha-GDM
-/src/exfiltrack/reporting/        @Maheesha-GDM
-/docs/scoring-model.md            @Maheesha-GDM
-/docs/user-guide.md               @Maheesha-GDM
+/src/exfiltrack/correlation/      @maheesha23
+/src/exfiltrack/reporting/        @maheesha23
+/docs/scoring-model.md            @maheesha23
+/docs/user-guide.md               @maheesha23
 
 # Shared ownership
-/tests/                           @Milindu-Weerawarna @Thabrew-DCL @Maheesha-GDM
-/docs/limitations.md              @Milindu-Weerawarna @Thabrew-DCL @Maheesha-GDM
+/tests/                           @Milindu-Weerawarna @lakaThabrew @maheesha23
+/docs/limitations.md              @Milindu-Weerawarna @lakaThabrew @maheesha23

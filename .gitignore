@@ -4,18 +4,16 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/parts/
+/sdist/
+/var/
+/wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -54,12 +52,22 @@ desktop.ini
 # ============================================================
 # FORENSIC EVIDENCE - NEVER COMMIT REAL CASE DATA
 # ============================================================
-# Acquired evidence, case output directories, and anything that
-# could contain real file names, device history, or user data.
-evidence/
-cases/
-case_output/
-output/
+# Acquired evidence and case output directories.
+#
+# NOTE: these directory patterns are anchored with a leading slash so they
+# match only at the repository root. An unanchored pattern such as
+# "evidence/" matches at EVERY depth and would silently exclude the source
+# package src/exfiltrack/evidence/, which breaks a fresh clone while still
+# passing locally. Keep the leading slash.
+/evidence/
+/cases/
+/case_output/
+/output/
+/reports/
+
+# Evidence file formats. Left unanchored on purpose: acquired evidence may be
+# placed in any local directory, and excluding it by extension everywhere is
+# the safer default. Synthetic fixtures are re-included at the bottom.
 *.evtx
 *.lnk
 *.automaticDestinations-ms
@@ -77,7 +85,6 @@ SECURITY
 *.vhdx
 
 # Generated reports
-reports/
 *.report.html
 *.report.json
 *.report.csv
@@ -88,6 +95,14 @@ reports/
 *.local.toml
 local_config.*
 
-# Allow committed synthetic test fixtures
+# ============================================================
+# Re-include committed synthetic test data
+# ============================================================
+# These negations rescue fixture files that the evidence patterns above would
+# otherwise exclude, for example tests/fixtures/registry/SYSTEM. Directory
+# entries are negated as well, because Git will not descend into an excluded
+# directory to re-include files inside it.
+!tests/fixtures/
 !tests/fixtures/**
+!examples/synthetic/
 !examples/synthetic/**

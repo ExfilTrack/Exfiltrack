@@ -29,12 +29,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ------------------------------------------------------------------
-# GitHub usernames. UPDATE THESE before running.
+# GitHub usernames.
 # Issues are created unassigned if a value is left empty.
 # ------------------------------------------------------------------
-$UserMilindu  = "Milindu-Weerawarna"
-$UserThabrew  = "Thabrew-DCL"
-$UserMaheesha = "Maheesha-GDM"
+$UserMilindu  = "Milindu-Weerawarna"   # Weerawarna S.B.M.N.  230699E
+$UserThabrew  = "lakaThabrew"          # Thabrew D. C. L.     230631P
+$UserMaheesha = "maheesha23"           # Dabarera G.D.M.      230111X
 
 function Test-GhCli {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
