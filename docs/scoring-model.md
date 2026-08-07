@@ -22,7 +22,9 @@ No single artifact is treated as proof. Multiple individually weak signals are c
 | `multiple_confidential_files` | Multiple confidential files accessed in one session | +15 |
 | `destination_hash_match` | Matching file hash found on the destination USB | +50 |
 
-_To document: whether the 30-second and 5-minute rules are mutually exclusive, and how repeated hits within one session are capped._
+**Stacking.** The 30-second and 5-minute rules do not stack. The 5-minute window contains the 30-second window, so a single file access is scored under exactly one of them — the narrower, higher-value rule wins when both would otherwise match.
+
+**Capping.** Per-file rules (both activity-timing rules, `sensitive_extension`, `protected_directory`, `destination_hash_match`) are not capped within a session: each qualifying file is independent evidence, so a session touching five confidential files scores higher than one touching a single file. `multiple_confidential_files` is the one session-level (not per-file) rule and fires at most once per session, when two or more *distinct* files in that session are confidential (matched by `sensitive_extension` or `protected_directory`).
 
 ## Confidence Levels
 
@@ -35,7 +37,16 @@ _To document: whether the 30-second and 5-minute rules are mutually exclusive, a
 
 `Confirmed` is never reached by score alone. It requires the hash match.
 
-_To document: exact score thresholds for Low, Medium, and High, and how they were chosen._
+**Thresholds** (`exfiltrack.config.ConfidenceThresholds`, issue #10):
+
+| Level | Rule |
+| --- | --- |
+| Low | Total score > 0 and none of the conditions below are met |
+| Medium | Total score ≥ 40, **or** `multiple_confidential_files` fired |
+| High | Total score ≥ 60 **and** both session boundaries are observed (not inferred) |
+| Confirmed | `destination_hash_match` fired — independent of score |
+
+40 was chosen because two independent file-level rules alone (for example `sensitive_extension` + `protected_directory` = 15 + 20 = 35) should not read as Medium; three should. 60 was chosen so High requires several rules corroborating each other, e.g. `activity_within_30s` + `protected_directory` + `multiple_confidential_files` (25 + 20 + 15), and additionally requires that the session's insertion *and* removal were both directly observed in the audit log rather than inferred, which is the "supporting audit-log ... evidence" the Confidence Evaluation Model (#10) describes. These are the proposal's initial calibration and, like the rule weights above, are expected to be revisited once #13 measures the false-positive rate against the four controlled scenarios.
 
 ## Reporting Language
 
