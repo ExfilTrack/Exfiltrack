@@ -7,6 +7,7 @@ Related issue: #2 - Evidence Intake and Hash Verification
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -93,3 +94,38 @@ class CaseConfig:
     def resolved_case_output_dir(self) -> Path:
         """Absolute, symlink-resolved case output directory."""
         return self.case_output_dir.resolve()
+
+        return self.case_output_dir.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Correlation and reporting configuration
+#
+# Owner: Dabarera G. D. M. (Maheesha)
+# Related issues: #8 - USB Session Reconstruction, #9 - Risk Scoring Engine,
+#                  #10 - Confidence Evaluation Model
+#
+# These live alongside CaseConfig rather than in correlation/ so every
+# tunable value the correlation engine uses is readable from one place, and
+# so #13 (Integration Testing) can vary them without touching scoring logic.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    """Tunable parameters for USB session reconstruction (issue #8).
+
+    Attributes:
+        idle_gap: When a device has no explicit removal event, the session
+            end is inferred as ``start + idle_gap`` (Definition of Done,
+            #8). The default is deliberately larger than the risk-scoring
+            engine's 5-minute activity window (#9), so an inferred session
+            boundary never truncates the window the scoring rules depend
+            on.
+    """
+
+    idle_gap: timedelta = timedelta(minutes=15)
+
+    def __post_init__(self) -> None:
+        if self.idle_gap <= timedelta(0):
+            raise ConfigError("SessionConfig.idle_gap must be a positive duration.")
