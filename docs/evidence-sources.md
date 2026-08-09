@@ -33,13 +33,28 @@ Planned coverage:
 
 **Parser:** `parsers/evtx_parser.py` (Thabrew)
 
-_To document: channels, providers, and event IDs used, and what each proves._
+The parser opens exported EVTX files read-only through `python-evtx`. It
+recognises the following narrow set of records and retains the event provider,
+ID, record ID (when present), and channel (when present) in each event's
+`details` field.
 
-Planned coverage:
+| Provider / event ID | Normalized event | What it establishes | What it does **not** establish |
+| --- | --- | --- | --- |
+| `Microsoft-Windows-DriverFrameworks-UserMode`, 2003 | `usb_insert` | A UMDF device-connection workflow began for the recorded device instance. | That the device was a mass-storage device, received a drive letter, or a file was copied. |
+| `Microsoft-Windows-DriverFrameworks-UserMode`, 2100 | `usb_remove_pending` | The device's UMDF connection was entering a removal workflow. | That removal completed; this event is deliberately not a session end. |
+| `Microsoft-Windows-DriverFrameworks-UserMode`, 2102 | `usb_remove` | A final UMDF device-disconnection workflow was recorded. | That physical removal happened at the exact timestamp on every Windows/device-driver version. |
+| `Microsoft-Windows-Kernel-PnP`, 20001 or 20003 | `usb_device_install` | A Plug and Play driver-install/service-add stage was recorded for the device instance. | A physical insertion, a completed installation, or device availability. These events are not used as session boundaries. |
+| `Microsoft-Windows-Security-Auditing`, 4663, `ObjectType=File` | `file_access` | The configured Windows audit policy recorded access to the named file object. | A copy to a USB device, successful transfer, or a file's contents being read. `AccessMask` and process fields are retained for review. |
 
-- Storage driver mount and unmount events
-- Device install and removal events
-- Caveat: relevant channels are frequently disabled by default, so absence of an event is not absence of the activity
+The DriverFrameworks operational channel is commonly exported separately from
+`System.evtx`; the parser identifies records by provider and event ID rather
+than trusting the filename, so an exported or renamed log remains analysable.
+Security 4663 is emitted only when the relevant audit policy and SACL are in
+place. Non-file 4663 records (for example registry-key access) are excluded.
+
+The `usb_device_install` and `usb_remove_pending` lifecycle labels preserve
+useful evidence for the report appendix. Only `usb_insert` and `usb_remove`
+are session boundaries for correlation.
 
 ## 3. Shortcut Files (`.lnk`)
 
