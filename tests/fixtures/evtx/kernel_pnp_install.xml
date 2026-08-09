@@ -1,0 +1,4 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System><Provider Name="Microsoft-Windows-Kernel-PnP" /><EventID>20001</EventID><TimeCreated SystemTime="2021-01-01T12:01:00Z" /></System>
+  <EventData><Data Name="DeviceId">USBSTOR\Disk&amp;Ven_Test&amp;Prod_Drive\SERIAL001</Data></EventData>
+</Event>
