@@ -76,12 +76,13 @@ that the file was copied.
 
 **Parser:** `parsers/jumplist_parser.py` (Thabrew)
 
-_To document: AppID mapping, embedded shortcut extraction, and per-application semantics._
+The parser consumes Windows Jump List artifacts (`.automaticDestinations-ms` and `.customDestinations-ms`) read-only, resolving the 16-character hexadecimal AppID in the filename to known applications (e.g., Windows Explorer, Microsoft Word). Unknown AppIDs are preserved as `unknown (<appid>)` to ensure no evidence is lost.
 
-Planned coverage:
+For `automaticDestinations-ms` (OLE Compound Files), the parser enumerates streams (skipping the `DestList` routing stream) and processes each numbered stream as a shortcut. For `customDestinations-ms`, it linearly carves embedded LNK files by scanning for the Shell Link header signature (`4C 00 00 00 01 14 02 ...`).
 
-- `automaticDestinations-ms` - recent and frequent entries
-- `customDestinations-ms` - application-defined entries
+Each valid extracted shortcut is passed to the underlying `lnk_parser` routines to retain exact shortcut semantics, emitting `file_created`, `file_access`, and `file_modified` timeline entries with UTC-normalized timestamps. The event `details` payload is augmented with the jump list provenance, including the `app_id`, resolved `application`, and (for automatic destinations) the `stream_name`.
+
+Corrupt or malformed embedded entries within a container are skipped defensively, preventing a single malformed stream from aborting the entire artifact parsing.
 
 ## 5. Reliability and Provenance
 
