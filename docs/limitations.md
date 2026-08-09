@@ -39,7 +39,7 @@ Scenarios that cannot be reliably detected by an offline artifact-analysis tool:
 
 _To document as implementation proceeds. Expected entries:_
 
-- Event log channels relevant to device mounting are frequently disabled by default, so the absence of an EVTX event does not mean the activity did not occur.
+- The `Microsoft-Windows-DriverFrameworks-UserMode/Operational` channel used for USB connection and removal evidence is frequently disabled by default. Security event 4663 also exists only when object-access auditing and the relevant SACL are configured. Therefore, the absence of an EVTX event does not guarantee the activity did not occur.
 - Registry `USBSTOR` timestamps record device first/last connection, not per-file activity.
 - Shortcut and Jump List timestamps record access, not copying. A file can be read without being copied and copied without being opened.
 - DOS timestamps have two-second resolution, which limits precision in the 30-second scoring window.

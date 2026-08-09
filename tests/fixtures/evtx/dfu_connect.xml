@@ -1,0 +1,10 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-DriverFrameworks-UserMode" />
+    <EventID>2003</EventID>
+    <TimeCreated SystemTime="2021-01-01T12:00:00.0000000Z" />
+    <EventRecordID>42</EventRecordID>
+    <Channel>Microsoft-Windows-DriverFrameworks-UserMode/Operational</Channel>
+  </System>
+  <EventData><Data Name="DeviceInstanceId">USB\VID_1234&amp;PID_5678\SERIAL001</Data></EventData>
+</Event>

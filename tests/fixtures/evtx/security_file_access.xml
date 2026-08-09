@@ -1,0 +1,7 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System><Provider Name="Microsoft-Windows-Security-Auditing" /><EventID>4663</EventID><TimeCreated SystemTime="2021-01-01T12:10:00Z" /></System>
+  <EventData>
+    <Data Name="ObjectType">File</Data><Data Name="ObjectName">E:\secret.txt</Data>
+    <Data Name="AccessMask">0x1</Data><Data Name="ProcessName">C:\Windows\explorer.exe</Data>
+  </EventData>
+</Event>
