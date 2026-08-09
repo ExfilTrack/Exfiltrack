@@ -190,3 +190,36 @@ class ScoringWeights:
         ):
             if getattr(self, name) < 0:
                 raise ConfigError(f"ScoringWeights.{name} must not be negative.")
+
+
+@dataclass(frozen=True)
+class ConfidenceThresholds:
+    """Score thresholds for the confidence levels (issue #10).
+
+    ``Confirmed`` has no threshold here: it is reached only when a
+    ``destination_hash_match`` contribution is present, never by score
+    alone (Definition of Done, #10). ``Low`` has no configurable threshold
+    either -- any session with a positive score and no stronger signal is
+    ``Low`` by definition.
+
+    See ``docs/scoring-model.md`` for the full reasoning behind these
+    defaults.
+
+    Attributes:
+        medium: Minimum total score for ``Medium``, absent a
+            ``multiple_confidential_files`` contribution (which reaches
+            ``Medium`` regardless of score, since it directly matches the
+            documented meaning of that level).
+        high: Minimum total score for ``High``, and only when both session
+            boundaries are observed rather than inferred (audit-log
+            corroboration, per the documented meaning of ``High``).
+    """
+
+    medium: int = 40
+    high: int = 60
+
+    def __post_init__(self) -> None:
+        if self.medium <= 0:
+            raise ConfigError("ConfidenceThresholds.medium must be positive.")
+        if self.high <= self.medium:
+            raise ConfigError("ConfidenceThresholds.high must be greater than medium.")
