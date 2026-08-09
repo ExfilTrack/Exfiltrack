@@ -60,13 +60,17 @@ are session boundaries for correlation.
 
 **Parser:** `parsers/lnk_parser.py` (Thabrew)
 
-_To document: structure fields consumed, timestamp semantics, and volume identification._
+The parser consumes the Shell Link header, LinkInfo, and StringData fields
+read-only. It records the target path, target size and attributes, the three
+header FILETIME values, and (where present) LinkInfo's volume serial number
+and drive type. A `removable` drive type helps attribute the shortcut target to
+a removable volume, but its volume serial is not a USB-device serial number
+and must not be used as a definitive physical-device identity.
 
-Planned coverage:
-
-- Target path, size, and attributes
-- Creation, access, and modification timestamps
-- Volume serial number and drive type, used to attribute a file to a removable volume
+The parser does not resolve shortcut targets against the analyst workstation.
+It emits separate creation, access, and modification timeline entries. The
+access entry means the shortcut recorded access to the target; it is not proof
+that the file was copied.
 
 ## 4. Jump Lists
 
