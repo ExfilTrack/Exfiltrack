@@ -391,8 +391,10 @@ def _details(metadata: _ShortcutMetadata, timestamp_kind: str) -> dict[str, obje
             if metadata.volume_serial_number is not None
             else None
         ),
-        "drive_type": _DRIVE_TYPES.get(metadata.drive_type, "unrecognized")
-        if metadata.drive_type is not None
-        else None,
+        "drive_type": (
+            _DRIVE_TYPES.get(metadata.drive_type, "unrecognized")
+            if metadata.drive_type is not None
+            else None
+        ),
         "drive_type_code": metadata.drive_type,
     }
