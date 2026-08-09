@@ -8,6 +8,7 @@ selected records missing required fields raise :class:`EvtxParseError`.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ _NS = {"ns": "http://schemas.microsoft.com/win/2004/08/events/event"}
 _DFU_PROVIDER = "Microsoft-Windows-DriverFrameworks-UserMode"
 _KERNEL_PNP_PROVIDER = "Microsoft-Windows-Kernel-PnP"
 _SECURITY_PROVIDER = "Microsoft-Windows-Security-Auditing"
+_ISO_FRACTION = re.compile(r"(?P<prefix>.+\.)(?P<fraction>\d+)(?P<offset>[+-]\d{2}:\d{2})$")
 
 # These lifecycle labels retain evidence that is useful to an investigator but
 # must not be treated as a completed insertion/removal by session reconstruction.
@@ -41,8 +43,8 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime:
     """Return an EVTX ISO-8601 timestamp converted to UTC.
 
     Windows commonly emits a trailing ``Z`` and can use seven fractional
-    second digits.  ``datetime.fromisoformat`` accepts both forms on supported
-    Python versions once ``Z`` is converted to an explicit UTC offset.
+    second digits. Python 3.10 supports microseconds only, so extra fractional
+    digits are truncated after converting ``Z`` to an explicit UTC offset.
     """
     if not raw_timestamp:
         raise EvtxParseError("Missing SystemTime in Event/System/TimeCreated")
@@ -50,6 +52,12 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime:
     timestamp = raw_timestamp.strip()
     if timestamp.endswith("Z"):
         timestamp = f"{timestamp[:-1]}+00:00"
+    fractional_match = _ISO_FRACTION.fullmatch(timestamp)
+    if fractional_match and len(fractional_match["fraction"]) > 6:
+        timestamp = (
+            f"{fractional_match['prefix']}{fractional_match['fraction'][:6]}"
+            f"{fractional_match['offset']}"
+        )
     try:
         parsed = datetime.fromisoformat(timestamp)
     except ValueError as exc:
