@@ -1,0 +1,211 @@
+/* ExfilTrack HTML report styles (issue #11). Inlined into report.html.j2
+   at render time so the report has no external dependencies. */
+
+:root {
+  --ink: #1b1f24;
+  --muted: #57606a;
+  --border: #d0d7de;
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --observed: #1a7f37;
+  --observed-bg: #dafbe1;
+  --inferred: #9a6700;
+  --inferred-bg: #fff8c5;
+  --confirmed: #82071e;
+  --confirmed-bg: #ffebe9;
+  --high: #9a6700;
+  --high-bg: #fff8c5;
+  --medium: #0969da;
+  --medium-bg: #ddf4ff;
+  --low: #57606a;
+  --low-bg: #f6f8fa;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg-subtle);
+  margin: 0;
+  padding: 2rem 1rem;
+  line-height: 1.5;
+}
+
+.report {
+  max-width: 960px;
+  margin: 0 auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+header.report-header {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+header.report-header h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+}
+
+.report-subtitle {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.disclaimer {
+  margin: 1rem 2rem 0 2rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--inferred);
+  background: var(--inferred-bg);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+section {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+section:last-child { border-bottom: none; }
+
+section h2 {
+  font-size: 1.15rem;
+  margin: 0 0 1rem 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+code, .mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--bg-subtle);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  overflow-wrap: break-word;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-observed { color: var(--observed); background: var(--observed-bg); }
+.badge-inferred { color: var(--inferred); background: var(--inferred-bg); }
+
+.badge-confidence-confirmed { color: var(--confirmed); background: var(--confirmed-bg); }
+.badge-confidence-high { color: var(--high); background: var(--high-bg); }
+.badge-confidence-medium { color: var(--medium); background: var(--medium-bg); }
+.badge-confidence-low { color: var(--low); background: var(--low-bg); }
+.badge-confidence-none { color: var(--low); background: var(--low-bg); }
+
+.badge-verdict-verified { color: var(--observed); background: var(--observed-bg); }
+.badge-verdict-pending { color: var(--inferred); background: var(--inferred-bg); }
+.badge-verdict-failed { color: var(--confirmed); background: var(--confirmed-bg); }
+
+.session {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 1.25rem;
+}
+
+.session:last-child { margin-bottom: 0; }
+
+.session-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-header .device-name {
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.session-body {
+  padding: 1rem;
+}
+
+.boundary-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.boundary-row .label {
+  color: var(--muted);
+  width: 4.5rem;
+  flex-shrink: 0;
+}
+
+.score-total {
+  font-weight: 700;
+}
+
+.no-activity, .no-findings {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.limitations {
+  font-size: 0.9rem;
+}
+
+.limitations h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.35rem 0;
+}
+
+.limitations pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: inherit;
+  margin: 0;
+}
+
+footer.report-footer {
+  padding: 1rem 2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  background: var(--bg-subtle);
+}
+
+@media print {
+  body { background: var(--bg); padding: 0; }
+  .report { border: none; border-radius: 0; max-width: none; }
+}

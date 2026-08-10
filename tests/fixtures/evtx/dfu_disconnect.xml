@@ -1,0 +1,4 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System><Provider Name="Microsoft-Windows-DriverFrameworks-UserMode" /><EventID>2102</EventID><TimeCreated SystemTime="2021-01-01T12:06:00Z" /></System>
+  <UserData><Device xmlns="urn:example"><DeviceInstanceId>USB\VID_1234&amp;PID_5678\SERIAL001</DeviceInstanceId></Device></UserData>
+</Event>

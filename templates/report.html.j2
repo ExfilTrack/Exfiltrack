@@ -1,0 +1,161 @@
+{# ExfilTrack HTML report (issue #11). Self-contained: no external CSS,
+   fonts, or scripts. All evidence-derived values are autoescaped by the
+   Environment configured in html_report.py. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ExfilTrack Report - {{ manifest.case_id }}</title>
+  <style>{{ inline_css }}</style>
+</head>
+<body>
+  <div class="report">
+    <header class="report-header">
+      <h1>ExfilTrack Report</h1>
+      <div class="report-subtitle">
+        Case <strong>{{ manifest.case_id }}</strong>
+        &middot; Examiner <strong>{{ manifest.examiner }}</strong>
+        &middot; Generated {{ generated_at | fmt_ts }}
+      </div>
+    </header>
+
+    <div class="disclaimer">
+      Findings in this report describe activity <strong>consistent with possible exfiltration</strong>.
+      Temporal correlation alone does not prove that a
+      file was copied. See <a href="#limitations">Limitations</a> before
+      acting on any finding below.
+    </div>
+
+    <section id="findings">
+      <h2>Findings ({{ findings | length }})</h2>
+      {% if not findings %}
+        <p class="no-findings">No USB sessions were reconstructed from the supplied evidence.</p>
+      {% else %}
+        {% for finding in findings %}
+          {% set session = finding.session %}
+          {% set scored = finding.scored_session %}
+          <div class="session">
+            <div class="session-header">
+              <span class="device-name">{{ session.device.display_name }}</span>
+              <span class="badge badge-confidence-{{ finding.confidence.level.name | lower }}">
+                {{ finding.confidence.level }}
+              </span>
+              <span class="score-total">Score {{ scored.total_score }}</span>
+            </div>
+            <div class="session-body">
+              <div class="boundary-row">
+                <span class="label">Start</span>
+                <span class="mono">{{ session.start.timestamp_utc | fmt_ts }}</span>
+                {% if session.start.observed %}
+                  <span class="badge badge-observed">Observed</span>
+                {% else %}
+                  <span class="badge badge-inferred">Inferred</span>
+                {% endif %}
+              </div>
+              <div class="boundary-row">
+                <span class="label">End</span>
+                <span class="mono">{{ session.end.timestamp_utc | fmt_ts }}</span>
+                {% if session.end.observed %}
+                  <span class="badge badge-observed">Observed</span>
+                {% else %}
+                  <span class="badge badge-inferred">Inferred</span>
+                {% endif %}
+              </div>
+              <p><em>{{ finding.confidence.reason }}</em></p>
+
+              {% if scored.contributions %}
+                <table>
+                  <thead>
+                    <tr><th>Rule</th><th>Points</th><th>Source artifact(s)</th><th>Explanation</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for c in scored.contributions %}
+                    <tr>
+                      <td>{{ c.rule | humanize }}</td>
+                      <td>{{ c.points }}</td>
+                      <td>
+                        {% for artifact in c.source_artifacts %}
+                          <div class="mono">{{ artifact }}</div>
+                        {% endfor %}
+                      </td>
+                      <td>{{ c.explanation }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <p class="no-activity">No scoring rule fired for this session.</p>
+              {% endif %}
+
+              {% if session.file_events %}
+                <table>
+                  <thead>
+                    <tr><th>Timestamp (UTC)</th><th>File path</th><th>Source artifact</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for event in session.file_events %}
+                    <tr>
+                      <td class="mono">{{ event.timestamp_utc | fmt_ts }}</td>
+                      <td class="mono">{{ event.file_path }}</td>
+                      <td class="mono">{{ event.source_artifact }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <p class="no-activity">No file activity fell within this session's window.</p>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% endif %}
+    </section>
+
+    <section id="chain-of-custody">
+      <h2>Chain of Custody</h2>
+      <table>
+        <tbody>
+          <tr><th>Case ID</th><td>{{ manifest.case_id }}</td></tr>
+          <tr><th>Examiner</th><td>{{ manifest.examiner }}</td></tr>
+          <tr><th>Tool</th><td>{{ manifest.tool_name }} {{ manifest.tool_version }}</td></tr>
+          <tr><th>Run started</th><td class="mono">{{ manifest.start_time | fmt_ts }}</td></tr>
+          <tr>
+            <th>Run ended</th>
+            <td class="mono">{% if manifest.end_time %}{{ manifest.end_time | fmt_ts }}{% else %}in progress{% endif %}</td>
+          </tr>
+          <tr>
+            <th>Integrity verdict</th>
+            <td><span class="badge badge-verdict-{{ manifest.integrity_verdict.value }}">{{ manifest.integrity_verdict.value }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      {% if manifest.parser_records %}
+        <h3>Parsers</h3>
+        <table>
+          <thead><tr><th>Parser</th><th>Version</th></tr></thead>
+          <tbody>
+            {% for record in manifest.parser_records %}
+            <tr><td>{{ record.name }}</td><td>{{ record.version }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <p>
+        {{ manifest.intake_digests | length }} artifact digest(s) recorded at intake,
+        {{ manifest.post_analysis_digests | length }} recorded post-analysis.
+      </p>
+    </section>
+
+    <section id="limitations" class="limitations">
+      <h2>Limitations</h2>
+      <pre>{{ limitations_text }}</pre>
+    </section>
+
+    <footer class="report-footer">
+      Generated by {{ tool_name }} {{ tool_version }} on {{ generated_at | fmt_ts }}.
+    </footer>
+  </div>
+</body>
+</html>
