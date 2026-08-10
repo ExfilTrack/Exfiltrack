@@ -21,8 +21,8 @@ suggests. Two limitations are structural and shape the code below:
 from __future__ import annotations
 
 import struct
-from collections.abc import Iterable, Iterator
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ from Registry import Registry
 from Registry import RegistryParse as registry_parse
 
 from exfiltrack.config import ExfilTrackError
-from exfiltrack.correlation.models import EventType, NormalizedEvent, UsbDevice
+from exfiltrack.normalization.event_model import EventType, NormalizedEvent, UsbDevice, sort_events
+from exfiltrack.normalization.timestamps import parse_filetime
 
 PARSER_NAME = "registry_parser"
 PARSER_VERSION = "1.0.0"
@@ -207,18 +208,30 @@ def _filetime_to_utc(raw: object) -> tuple[datetime, str] | None:
     Returns ``None`` when the value is absent or zero, which the registry uses
     to mean "never recorded" rather than 1601-01-01.
     """
-    ticks: int | None = None
-    if isinstance(raw, int):
-        ticks = raw
-    elif isinstance(raw, bytes) and len(raw) >= 8:
-        ticks = struct.unpack_from("<Q", raw, 0)[0]
+    if raw is None:
+        return None
 
-    if not ticks or ticks <= 0:
-        return None
+    if isinstance(raw, int):
+        if raw == 0:
+            return None
+        ticks = raw
+    elif isinstance(raw, bytes):
+        if len(raw) == 0:
+            return None
+        if len(raw) != 8:
+            raise RegistryParseError(
+                f"Malformed FILETIME value: expected 8 bytes, got {len(raw)} bytes"
+            )
+        ticks = struct.unpack("<Q", raw)[0]
+        if ticks == 0:
+            return None
+    else:
+        raise RegistryParseError(f"Malformed FILETIME value: unsupported type {type(raw)}")
+
     try:
-        return _FILETIME_EPOCH + timedelta(microseconds=ticks // 10), str(ticks)
-    except (OverflowError, OSError, ValueError):
-        return None
+        return parse_filetime(ticks), str(ticks)
+    except ValueError as exc:
+        raise RegistryParseError(f"Malformed FILETIME value: {exc}") from exc
 
 
 def _device_property_timestamp(
@@ -578,22 +591,7 @@ def parse_ntuser_hive(file_path: Path | str) -> list[NormalizedEvent]:
 # ---------------------------------------------------------------------------
 
 
-def sort_events(events: Iterable[NormalizedEvent]) -> list[NormalizedEvent]:
-    """Return *events* in a deterministic order independent of hive layout.
-
-    Registry enumeration order is an implementation detail of the hive's
-    internal cell layout, so it is never relied upon.
-    """
-    return sorted(
-        events,
-        key=lambda event: (
-            event.timestamp_utc,
-            event.event_type,
-            event.device.device_id if event.device else "",
-            str(event.details.get("registry_key", "")),
-            str(event.details.get("mount_entry", event.details.get("mount_point_entry", ""))),
-        ),
-    )
+# sort_events is imported from exfiltrack.normalization.event_model
 
 
 def parse_registry_hive(file_path: Path | str) -> list[NormalizedEvent]:
