@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 from exfiltrack.config import ExfilTrackError
-from exfiltrack.correlation.models import NormalizedEvent
+from exfiltrack.normalization.event_model import NormalizedEvent
+from exfiltrack.normalization.timestamps import parse_filetime
 
 
 class LnkParseError(ExfilTrackError):
@@ -30,7 +31,6 @@ PARSER_VERSION = "1.0.0"
 
 _HEADER_SIZE = 0x4C
 _HEADER_CLSID = bytes.fromhex("0114020000000000c000000000000046")
-_FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 _LINK_FLAG_HAS_ID_LIST = 0x00000001
 _LINK_FLAG_HAS_LINK_INFO = 0x00000002
 _LINK_FLAG_HAS_NAME = 0x00000004
@@ -374,9 +374,11 @@ def _join_target_path(base: str, suffix: str) -> str:
 
 def _filetime_to_utc(value: int, field: str) -> datetime:
     try:
-        return _FILETIME_EPOCH + timedelta(microseconds=value // 10)
-    except OverflowError as exc:
-        raise LnkParseError(f"{field} FILETIME is outside Python's datetime range") from exc
+        return parse_filetime(value)
+    except ValueError as exc:
+        raise LnkParseError(
+            f"{field} FILETIME is outside Python's datetime range or invalid: {exc}"
+        ) from exc
 
 
 def _details(metadata: _ShortcutMetadata, timestamp_kind: str) -> dict[str, object]:

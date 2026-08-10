@@ -18,11 +18,11 @@ from pathlib import Path
 import olefile
 
 from exfiltrack.config import ExfilTrackError
-from exfiltrack.correlation.models import NormalizedEvent
+from exfiltrack.normalization.event_model import NormalizedEvent
+from exfiltrack.normalization.timestamps import parse_filetime
 from exfiltrack.parsers.lnk_parser import (
     LnkParseError,
     _details,
-    _filetime_to_utc,
     _parse_shortcut,
 )
 
@@ -175,9 +175,14 @@ def _emit_events(
         if stream_name:
             event_details["stream_name"] = stream_name
 
+        try:
+            timestamp_utc = parse_filetime(raw_filetime)
+        except ValueError as exc:
+            raise JumpListParseError(f"{timestamp_kind} FILETIME is invalid: {exc}") from exc
+
         yield NormalizedEvent(
             event_type=event_type,
-            timestamp_utc=_filetime_to_utc(raw_filetime, timestamp_kind),
+            timestamp_utc=timestamp_utc,
             raw_timestamp=str(raw_filetime),
             source_artifact=source_artifact,
             parser_name=PARSER_NAME,

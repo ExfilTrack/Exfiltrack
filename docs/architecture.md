@@ -52,7 +52,12 @@ _To document: stage inputs, outputs, and failure behaviour._
 
 ## 4. Data Flow
 
-_To document: the normalized event model as the single contract between parsers and the correlation engine._
+The `NormalizedEvent` model acts as the single, strict contract between the artifact parsers (Stage 3) and the correlation engine (Stages 5-6). Parsers must transform artifact-specific formats (e.g., EVTX XML, LNK binary structures, Windows Registry types) into standard normalized events.
+
+Key constraints:
+- All temporal values must be strictly normalized to timezone-aware UTC `datetime` objects with a 0-offset.
+- Every event carries mandatory provenance (`source_artifact`, `parser_name`, `parser_version`) establishing a direct chain back to the original evidence.
+- The original raw timestamp string is preserved unmodified to allow investigators to verify the conversion.
 
 ## 5. Chain of Custody
 
@@ -64,7 +69,9 @@ _To document: where each of the seven requirements in the README is enforced in 
 
 ## 7. Reproducibility
 
-_To document: sources of non-determinism (dict ordering, filesystem walk order, timestamp ties) and how each is eliminated._
+Reproducibility guarantees that identical evidence always yields identical correlation and scoring results. Non-determinism is eliminated by:
+- **Timestamp Ties:** Real-world artifacts often record multiple events at the exact same sub-second timestamp. The `NormalizedEvent` sorting uses a deterministic multi-field tie-breaker: `(timestamp_utc, event_type, source_artifact, raw_timestamp, device_id, file_path)`. This guarantees stability regardless of parser execution order.
+- **Merge Laziness:** Event streams from individual parsers are lazily merged (`heapq.merge`) rather than collected in bulk, preserving the stable order of ties across streams where earlier stream arguments systematically win.
 
 ## 8. Error Handling Strategy
 
