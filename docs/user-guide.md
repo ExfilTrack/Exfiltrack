@@ -30,7 +30,8 @@ pip install -e ".[dev]"
 
 ## Preparing Evidence
 
-_To document: how to export each artifact type from the target machine without altering it._
+For prerequisites and source-specific export procedures, see
+[evidence-sources.md §6.2](evidence-sources.md#62-export-procedures).
 
 Expected layout:
 
@@ -42,7 +43,8 @@ evidence/
 │   └── NTUSER.DAT
 ├── evtx/
 │   ├── System.evtx
-│   └── Security.evtx
+│   ├── Security.evtx
+│   └── Microsoft-Windows-DriverFrameworks-UserMode%4Operational.evtx
 ├── lnk/
 └── jumplists/
 ```
