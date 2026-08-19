@@ -54,14 +54,18 @@ Output is phrased as "evidence consistent with possible exfiltration", never as 
 
 ## Calibration and Evaluation
 
-_To document: false-positive rate measured against the four controlled scenarios in the proposal, and any weight adjustments that resulted._
+Controlled scenarios, run end to end through `tests/integration/test_scenarios.py` (#13) against the default weights and thresholds documented above:
 
-Controlled scenarios:
+| Scenario | Evidence | Result | Assertion |
+| --- | --- | --- | --- |
+| 1. Normal, non-suspicious USB use | Insertion, an ordinary file opened ~2 hours later (outside every timing window, non-sensitive extension), removal | 1 session, 1 finding, confidence below High | No false positive: score stays out of High/Confirmed |
+| 2. Simulated theft of synthetic confidential files | Insertion, two distinct confidential files (`.sql`, `.pem`) accessed within 12s | 1 finding, score 95 (2 × `activity_within_30s` + `sensitive_extension`, + `multiple_confidential_files`), both boundaries observed | Confidence **High** |
+| 3. Archive staging and deletion | Insertion, one `.zip` written at +10s then deleted at +3min, same session | 1 finding, score 70 (`activity_within_30s` + `activity_within_5min`, both with `sensitive_extension`) | Confidence **High** (within the Medium-to-High range the scenario expects) |
+| 4. Unrelated recent-file activity with no USB copy | A file-access event with no device-lifecycle event anywhere in the evidence | Event parsed and retained, but 0 sessions, 0 findings | No accusation possible: there is nothing for a device to be attributed to |
 
-1. Normal, non-suspicious USB use
-2. Simulated theft of synthetic confidential files
-3. Archive staging and deletion
-4. Unrelated recent-file activity with no USB copy
+This is a small, hand-built evidence set exercising the pipeline's wiring and the scoring/confidence boundaries, not a statistical false-positive-rate measurement over realistic data volumes — that requires the VM-generated evidence #36 (baseline vs. hardened comparison) produces. No weight adjustments resulted from this pass; the initial calibration above held up against all four scenarios as specified.
+
+Reproducibility and integrity, also part of #13's Definition of Done, are covered separately in `tests/integration/test_reproducibility.py`: identical evidence and config produce byte-identical `manifest.json`, `report.html`, and both CSV outputs, and evidence digests are unchanged (independently re-hashed, not just compared against the pipeline's own recorded value) after a full run.
 
 ## Known Weaknesses
 

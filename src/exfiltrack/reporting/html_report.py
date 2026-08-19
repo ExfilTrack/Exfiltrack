@@ -11,6 +11,7 @@ machine with no network access.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,16 @@ _FORBIDDEN_PHRASES = (
     "definitively",
 )
 _REQUIRED_DISCLAIMER = "consistent with possible exfiltration"
+
+# Whole-word/whole-phrase patterns for _FORBIDDEN_PHRASES. A plain substring
+# check false-positives on unrelated words that merely contain a forbidden
+# one -- e.g. "proved" inside "approved" -- which is exactly the sentence
+# docs/limitations.md uses for the clipboard limitation ("pasted into
+# approved communication platforms"). Found via #13 integration testing,
+# running this renderer against the real limitations text for the first time.
+_FORBIDDEN_PATTERNS = [
+    re.compile(r"\b" + re.escape(phrase) + r"\b") for phrase in _FORBIDDEN_PHRASES
+]
 
 
 class ReportError(ExfilTrackError):
@@ -138,8 +149,8 @@ def _assert_safe_wording(html: str) -> None:
     docs/limitations.md).
     """
     lowered = html.lower()
-    for phrase in _FORBIDDEN_PHRASES:
-        if phrase in lowered:
+    for phrase, pattern in zip(_FORBIDDEN_PHRASES, _FORBIDDEN_PATTERNS, strict=True):
+        if pattern.search(lowered):
             raise ReportError(
                 f"Report text contains forbidden phrase '{phrase}'. Findings must be "
                 "phrased as activity consistent with possible exfiltration, never as "
