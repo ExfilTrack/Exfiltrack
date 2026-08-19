@@ -120,3 +120,21 @@ _To document, per source: what it proves, what it only suggests, and known ways 
 ## 6. Acquisition Notes
 
 _To document: how a tester should export each artifact from a Windows VM without altering it._
+
+### Prerequisite: the artifact must exist before you can export it
+
+Two sources in the table above are not present on a default Windows 10/11 install and must be enabled on the test VM before any scenario is run, or the export will be empty:
+
+| Source | Enable with |
+| --- | --- |
+| `Microsoft-Windows-DriverFrameworks-UserMode/Operational` — the only source of `usb_insert` and `usb_remove` session boundaries | `wevtutil sl Microsoft-Windows-DriverFrameworks-UserMode/Operational /e:true` |
+| Security 4663 `ObjectType=File` | Advanced Audit Policy → Object Access → *Audit File System* (Success), plus a SACL on the target directories |
+
+Two further settings should be confirmed before a run, since either will silently empty the `.lnk` and Jump List exports:
+
+| Setting | Required value |
+| --- | --- |
+| `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\NoRecentDocsHistory` | `0` or absent |
+| `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\Start_TrackDocs` | `1` |
+
+See [organizational-prerequisites.md](organizational-prerequisites.md) for the full list, the verification script, and the baseline-vs-hardened test matrix.
