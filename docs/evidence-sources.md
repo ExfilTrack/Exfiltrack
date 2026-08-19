@@ -3,7 +3,7 @@
 **Owner:** Thabrew D. C. L.
 **Tracking issues:** #3, #4, #5, #6
 
-Status: outline. Sections are placeholders to be filled as each parser is implemented.
+Status: complete.
 
 ---
 
@@ -115,8 +115,57 @@ Corrupt or malformed embedded entries within a container are skipped defensively
 
 ## 5. Reliability and Provenance
 
-_To document, per source: what it proves, what it only suggests, and known ways it can be misleading._
+- **Registry Hives (`SYSTEM`, `SOFTWARE`, `NTUSER.DAT`)**:
+  - *Proves*: A device was connected to the machine at least once, and which user account mounted the volume.
+  - *Suggests*: The time of connection (as earlier connections are overwritten). A generated serial (second character `&`) identifies a port path, not a unique physical device, which can be misleading if treated as a unique device identifier.
+- **Windows Event Logs (`.evtx`)**:
+  - *Proves*: Device connection workflows started or ended, and that a file object was accessed (if audit policies are configured).
+  - *Suggests*: Exact physical insertion or removal timing. A 4663 file access event proves access occurred, but it does *not* prove a file was successfully copied to a USB device or its contents were read.
+- **Shortcut Files (`.lnk`)**:
+  - *Proves*: A file or folder was accessed, along with its path and size at that time.
+  - *Suggests*: That a file was copied or exfiltrated. An access entry means the shortcut recorded access to the target; it is not definitive proof of a file transfer.
+- **Jump Lists**:
+  - *Proves*: A user recently or frequently accessed specific documents via known applications.
+  - *Suggests*: Like shortcut files, this only proves the file was opened or interacted with by the application, not that it was copied to external media.
 
 ## 6. Acquisition Notes
 
-_To document: how a tester should export each artifact from a Windows VM without altering it._
+### 6.1 Prerequisites
+
+Before any scenario runs, the test VM must have the following settings enabled to ensure artifacts are actually generated:
+
+- Enable DriverFrameworks operational logging:
+  `wevtutil sl Microsoft-Windows-DriverFrameworks-UserMode/Operational /e:true`
+- Enable Advanced Audit Policy for file access: Object Access -> Audit File System (Success), and ensure a System Access Control List (SACL) is applied on the target directories.
+- Ensure Recent Documents tracking is active:
+  - `NoRecentDocsHistory` must be `0` or absent.
+  - `Start_TrackDocs` must be `1`.
+
+*For a script to verify these settings, see [docs/organizational-prerequisites.md](organizational-prerequisites.md) § Part 6.*
+
+### 6.2 Export Procedures
+
+To export artifacts from a Windows VM without altering them, follow these guidelines depending on the source. Each artifact must be placed in its corresponding directory within the `evidence/` layout defined in `docs/user-guide.md`.
+
+Before exporting, create the `evidence\registry\`, `evidence\evtx\`,
+`evidence\lnk\`, and `evidence\jumplists\` directories. This ensures the
+export commands below have valid destinations.
+
+- **Registry Hives (`SYSTEM`, `SOFTWARE`, `NTUSER.DAT`)**:
+  - *State*: VM powered off (Offline export).
+  - *Procedure*: Mount the VM's virtual disk offline or boot into a forensic environment. Copy the hive files directly from their original paths to the `evidence\registry\` directory:
+    - `C:\Windows\System32\config\SYSTEM` -> `evidence\registry\SYSTEM`
+    - `C:\Windows\System32\config\SOFTWARE` -> `evidence\registry\SOFTWARE`
+    - `C:\Users\<Username>\NTUSER.DAT` -> `evidence\registry\NTUSER.DAT`
+- **Windows Event Logs (`.evtx`)**:
+  - *State*: Can be exported live.
+  - *Procedure*: Use the `wevtutil epl` command from an elevated command prompt to save the specific logs into the `evidence\evtx\` directory:
+    - `wevtutil epl System evidence\evtx\System.evtx`
+    - `wevtutil epl Security evidence\evtx\Security.evtx`
+    - `wevtutil epl Microsoft-Windows-DriverFrameworks-UserMode/Operational evidence\evtx\Microsoft-Windows-DriverFrameworks-UserMode%4Operational.evtx`
+- **Shortcut Files (`.lnk`)**:
+  - *State*: Can be exported live or offline.
+  - *Procedure*: For live export, use a command-line copy tool (e.g., `xcopy` or `Robocopy`) or PowerShell to copy the files from `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Recent\` to the `evidence\lnk\` directory. Do not use Windows Explorer, as browsing to these folders can trigger new shortcut creation.
+- **Jump Lists**:
+  - *State*: Can be exported live or offline.
+  - *Procedure*: For live export, copy the files from both `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\` and `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\` to the `evidence\jumplists\` directory using command-line tools, avoiding Windows Explorer for the same reasons as shortcut files.
