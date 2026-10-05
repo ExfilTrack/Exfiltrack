@@ -36,6 +36,11 @@ from exfiltrack.normalization.timestamps import parse_filetime
 PARSER_NAME = "registry_parser"
 PARSER_VERSION = "1.0.0"
 
+# FILETIME's epoch. A device-property timestamp exactly equal to this means
+# "never recorded" (the registry equivalent of zero ticks), whether it
+# arrives as raw ticks or as a datetime -- see _filetime_to_utc.
+_FILETIME_EPOCH_UTC = datetime(1601, 1, 1, tzinfo=timezone.utc)
+
 
 class RegistryParseError(ExfilTrackError):
     """Raised when a hive is missing, corrupt, or structurally unusable."""
@@ -210,6 +215,18 @@ def _filetime_to_utc(raw: object) -> tuple[datetime, str] | None:
     """
     if raw is None:
         return None
+
+    if isinstance(raw, datetime):
+        # Device Container property-store values (the USBSTOR
+        # first-install/arrival/removal timestamps this function exists for)
+        # are decoded to a datetime by some python-registry versions instead
+        # of being left as a raw FILETIME. python-registry's own datetimes
+        # are naive but already represent UTC -- see _key_timestamp, which
+        # documents and relies on the same behaviour.
+        utc = raw.replace(tzinfo=timezone.utc) if raw.tzinfo is None else raw.astimezone(timezone.utc)
+        if utc == _FILETIME_EPOCH_UTC:
+            return None
+        return utc, utc.isoformat()
 
     if isinstance(raw, int):
         if raw == 0:
