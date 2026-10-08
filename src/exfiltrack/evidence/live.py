@@ -26,6 +26,21 @@ from exfiltrack.config import ExfilTrackError
 from exfiltrack.evidence.hashing import hash_file
 from exfiltrack.evidence.manifest import utc_now
 
+# Windows-only ctypes entry points, resolved through getattr so this module
+# stays importable and type-checkable on non-Windows hosts (CI runs mypy on
+# Linux, where ctypes has no WinDLL/WinError/get_last_error attributes).
+# They are only ever called from Windows-only code paths guarded at
+# collection time.
+_WinError: Any = getattr(ctypes, "WinError", None)
+_get_last_error: Any = getattr(ctypes, "get_last_error", None)
+
+
+def _windll(name: str, **kwargs: Any) -> Any:
+    """Load a Windows DLL, resolved at call time so tests can patch ctypes.WinDLL."""
+    # getattr is deliberate: attribute access would fail mypy on non-Windows CI.
+    return getattr(ctypes, "WinDLL")(name, **kwargs)  # noqa: B009
+
+
 _CHANNELS = (
     "System",
     "Security",
@@ -105,8 +120,8 @@ def _failure(record: dict[str, Any], exc: Exception) -> None:
 
 def _is_elevated() -> bool:
     # Query TokenElevation rather than infer elevation from username/group names.
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = _windll("kernel32", use_last_error=True)
+    advapi = _windll("advapi32", use_last_error=True)
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     advapi.OpenProcessToken.argtypes = [
@@ -123,21 +138,21 @@ def _is_elevated() -> bool:
     ]
     token = wintypes.HANDLE()
     if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _WinError(_get_last_error())
     try:
         elevated = wintypes.DWORD()
         length = wintypes.DWORD()
         if not advapi.GetTokenInformation(
             token, 20, ctypes.byref(elevated), ctypes.sizeof(elevated), ctypes.byref(length)
         ):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise _WinError(_get_last_error())
         return bool(elevated.value)
     finally:
         kernel.CloseHandle(token)
 
 
 def _windows_directory() -> Path:
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = _windll("kernel32", use_last_error=True)
     kernel.GetWindowsDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
     kernel.GetWindowsDirectoryW.restype = wintypes.UINT
     buffer = ctypes.create_unicode_buffer(32768)
@@ -153,12 +168,12 @@ def _windows_directory() -> Path:
 def _is_wow64() -> bool:
     if ctypes.sizeof(ctypes.c_void_p) != 4:
         return False
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = _windll("kernel32", use_last_error=True)
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
     value = wintypes.BOOL()
     if not kernel.IsWow64Process(kernel.GetCurrentProcess(), ctypes.byref(value)):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _WinError(_get_last_error())
     return bool(value.value)
 
 
