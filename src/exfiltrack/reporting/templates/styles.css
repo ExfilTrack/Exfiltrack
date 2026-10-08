@@ -131,6 +131,36 @@ code, .mono {
 .badge-verdict-pending { color: var(--inferred); background: var(--inferred-bg); }
 .badge-verdict-failed { color: var(--confirmed); background: var(--confirmed-bg); }
 
+.badge-coverage-complete, .badge-acquisition-collected {
+  color: var(--observed);
+  background: var(--observed-bg);
+}
+
+.badge-coverage-partial, .badge-acquisition-missing,
+.badge-acquisition-unavailable, .badge-acquisition-empty {
+  color: var(--inferred);
+  background: var(--inferred-bg);
+}
+
+.badge-acquisition-error { color: var(--confirmed); background: var(--confirmed-bg); }
+
+.coverage-warning, .analysis-warning {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border: 2px solid var(--inferred);
+  background: var(--inferred-bg);
+  border-radius: 6px;
+}
+
+.acquisition-disclaimer { font-size: 0.9rem; }
+.acquisition-records, .parser-errors { table-layout: fixed; }
+.acquisition-records td, .acquisition-records .mono,
+.parser-errors td, .parser-errors .mono { overflow-wrap: anywhere; }
+.acquisition-message, .parser-error-message { white-space: pre-wrap; }
+.acquisition-metadata { margin: 0.5rem 0 0; }
+.acquisition-metadata dt { font-weight: 600; }
+.acquisition-metadata dd { margin: 0 0 0.35rem; }
+
 .session {
   border: 1px solid var(--border);
   border-radius: 6px;

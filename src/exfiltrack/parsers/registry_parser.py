@@ -223,7 +223,9 @@ def _filetime_to_utc(raw: object) -> tuple[datetime, str] | None:
         # of being left as a raw FILETIME. python-registry's own datetimes
         # are naive but already represent UTC -- see _key_timestamp, which
         # documents and relies on the same behaviour.
-        utc = raw.replace(tzinfo=timezone.utc) if raw.tzinfo is None else raw.astimezone(timezone.utc)
+        utc = (
+            raw.replace(tzinfo=timezone.utc) if raw.tzinfo is None else raw.astimezone(timezone.utc)
+        )
         if utc == _FILETIME_EPOCH_UTC:
             return None
         return utc, utc.isoformat()

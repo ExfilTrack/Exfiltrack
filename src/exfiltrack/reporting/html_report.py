@@ -21,9 +21,9 @@ from exfiltrack.config import ExfilTrackError
 from exfiltrack.evidence.manifest import CaseManifest
 from exfiltrack.reporting.model import Finding
 
-# templates/ lives at the repository root, not under src/, per
-# templates/README.md. From this file: reporting -> exfiltrack -> src -> root.
-DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+# Keep the default resources beside this module so source checkouts and
+# installed wheels use the same canonical templates and stylesheet.
+DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 REPORT_FILENAME = "report.html"
 TEMPLATE_NAME = "report.html.j2"
 
@@ -98,7 +98,7 @@ def render_html_report(
             linked so the report stands alone on a machine with no network
             access.
         templates_dir: Override for the templates directory. Defaults to
-            the repository's top-level ``templates/``.
+            the packaged ``exfiltrack.reporting/templates/`` resources.
         generated_at: Override for the report's generation timestamp.
             Defaults to now, in the manifest's timezone.
 

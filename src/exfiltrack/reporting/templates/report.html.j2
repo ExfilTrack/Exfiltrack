@@ -26,6 +26,114 @@
       acting on any finding below.
     </div>
 
+    {% if manifest.acquisition is defined and manifest.acquisition is not none %}
+      {% set acquisition = manifest.acquisition %}
+      <section id="evidence-coverage">
+        <h2>Evidence Coverage</h2>
+        {% if acquisition.coverage == 'partial' %}
+          <div class="coverage-warning" role="note">
+            <strong>Partial evidence coverage.</strong> Findings are limited to the collected snapshots.
+            Review incomplete or unavailable sources and diagnostics below before interpreting findings.
+          </div>
+        {% endif %}
+        <table>
+          <tbody>
+            <tr><th>Collection coverage</th><td><span class="badge badge-coverage-{{ acquisition.coverage }}">{{ acquisition.coverage | title }}</span></td></tr>
+            <tr><th>Collection machine</th><td>{{ acquisition.computer_name }}</td></tr>
+            <tr><th>Collection case ID</th><td>{{ acquisition.case_id }}</td></tr>
+            <tr><th>Collection examiner</th><td>{{ acquisition.examiner }}</td></tr>
+            <tr><th>Collection started</th><td class="mono">{{ acquisition.start_time }}</td></tr>
+            <tr><th>Collection ended</th><td class="mono">{% if acquisition.end_time %}{{ acquisition.end_time }}{% else %}in progress{% endif %}</td></tr>
+            <tr><th>Acquisition schema version</th><td>{{ acquisition.schema_version }}</td></tr>
+          </tbody>
+        </table>
+        <p>Coverage describes the recorded collection attempts, not completeness of historical activity.</p>
+        <p class="acquisition-disclaimer">
+          Live collection creates activity on the collection machine. Snapshots are not atomic.
+          The integrity verdict applies to collected snapshots, not to an unchanged live system.
+          Absent evidence does not mean absence of activity.
+          Enabling logging afterward cannot recover past events.
+        </p>
+        {% if acquisition.limitations %}
+          <h3>Acquisition Limitations</h3>
+          <ul>
+            {% for limitation in acquisition.limitations %}
+              <li>{{ limitation }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if acquisition.records %}
+          <table class="acquisition-records">
+            <thead>
+              <tr><th>Category</th><th>Source and snapshot</th><th>Method</th><th>Status</th><th>Collection time</th><th>Diagnostics</th></tr>
+            </thead>
+            <tbody>
+              {% for record in acquisition.records %}
+                <tr>
+                  <td>{{ record.category }}</td>
+                  <td>
+                    <div class="mono">{{ record.source }}</div>
+                    {% if record.status == 'collected' %}
+                      <div><strong>Destination (relative to evidence root)</strong></div>
+                      <div class="mono">{{ record.destination }}</div>
+                      <div><strong>SHA-256</strong></div>
+                      <div class="mono">{{ record.sha256 }}</div>
+                    {% endif %}
+                  </td>
+                  <td>{{ record.method }}</td>
+                  <td><span class="badge badge-acquisition-{{ record.status }}">{{ record.status }}</span></td>
+                  <td>
+                    <div><strong>Started</strong></div>
+                    <div class="mono">{{ record.started_at }}</div>
+                    <div><strong>Finished</strong></div>
+                    <div class="mono">{% if record.finished_at %}{{ record.finished_at }}{% else %}in progress{% endif %}</div>
+                  </td>
+                  <td>
+                    {% if record.message %}<div class="acquisition-message">{{ record.message }}</div>{% endif %}
+                    {% if record.metadata %}
+                      <dl class="acquisition-metadata">
+                        {% for key, value in record.metadata.items() %}
+                          <dt>{{ key }}</dt><dd>{{ value }}</dd>
+                        {% endfor %}
+                      </dl>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="no-activity">No acquisition records were supplied.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+    {% if manifest.parser_errors is defined and manifest.parser_errors %}
+      <section id="analysis-coverage">
+        <h2>Analysis Coverage</h2>
+        <div class="analysis-warning" role="note">
+          <strong>Partial analysis.</strong> One or more artifacts could not be parsed.
+          Findings are based only on successfully parsed evidence; failed artifacts do not mean absence of activity.
+          Review the errors below before interpreting findings.
+        </div>
+        <table class="parser-errors">
+          <thead>
+            <tr><th>Source artifact</th><th>Artifact type</th><th>Parser name</th><th>Parser version</th><th>Error type</th><th>Message</th></tr>
+          </thead>
+          <tbody>
+            {% for parser_error in manifest.parser_errors %}
+              <tr>
+                <td class="mono">{{ parser_error.source_artifact }}</td>
+                <td>{{ parser_error.artifact_type }}</td>
+                <td>{{ parser_error.parser_name }}</td>
+                <td>{{ parser_error.parser_version }}</td>
+                <td>{{ parser_error.error_type }}</td>
+                <td class="parser-error-message">{{ parser_error.message }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    {% endif %}
     <section id="findings">
       <h2>Findings ({{ findings | length }})</h2>
       {% if not findings %}

@@ -142,10 +142,13 @@ black --check src/ tests/
 
 ## Usage
 
-The CLI is not implemented yet. The planned interface is:
-
 ```bash
-exfiltrack analyze --evidence ./evidence --case-dir ./cases/CASE-001 --case-id CASE-001
+# Analyze evidence you have already exported
+exfiltrack analyze --evidence ./evidence --case-dir ./cases/CASE-001 --case-id CASE-001 --examiner "Your Name"
+
+# Collect from this live Windows machine (elevated terminal), then analyze
+exfiltrack analyze --auto --case-dir ./cases/CASE-002 --case-id CASE-002 --examiner "Your Name"
+
 exfiltrack verify  --case-dir ./cases/CASE-001
 ```
 
