@@ -107,6 +107,27 @@ For an `--auto` case, pass the case directory itself; its `reports/case_manifest
 
 _To document: what a pass and a failure look like, and what to do if digests do not match._
 
+## Graphical Interface
+
+A desktop GUI wraps the same pipeline; it adds no new behaviour and no new dependencies (tkinter ships with Python on Windows).
+
+```bash
+exfiltrack-gui
+# or, without the entry point:
+python -m exfiltrack.gui
+```
+
+1. Enter the **case ID** and **examiner** name.
+2. Choose the mode:
+   - **Offline evidence directory** — equivalent to `analyze --evidence`. Pick the evidence folder prepared earlier.
+   - **Live acquisition** — equivalent to `analyze --auto`. Run from an elevated terminal and pick a **case directory that does not exist yet**; the evidence picker is disabled because artifacts are collected from the machine.
+3. Pick the **case output directory** (offline mode). It must not be inside the evidence directory; the GUI rejects that before a run starts.
+4. Click **Run Analysis**. The run executes in the background; progress and any parser warnings appear in the log pane.
+5. Review the findings table — device, session start, risk score, confidence, and whether session boundaries were observed or inferred. **Double-click a row** for the confidence reason and the per-rule score breakdown.
+6. Use **Open HTML Report** or **Open Output Folder** to reach the full report, and **Verify Case Integrity...** to re-check a case's recorded digests (equivalent to `exfiltrack verify`).
+
+All CLI rules apply unchanged: evidence is opened read-only, output is never written inside the evidence tree, and errors are shown as messages, not tracebacks. The mandated wording — *"ExfilTrack identifies activity consistent with possible USB-based data exfiltration. Temporal correlation alone does not prove that a file was copied."* — is shown at the bottom of the window.
+
 ## Reading the Report
 
 _To document, once the HTML report exists:_

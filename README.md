@@ -150,6 +150,9 @@ exfiltrack analyze --evidence ./evidence --case-dir ./cases/CASE-001 --case-id C
 exfiltrack analyze --auto --case-dir ./cases/CASE-002 --case-id CASE-002 --examiner "Your Name"
 
 exfiltrack verify  --case-dir ./cases/CASE-001
+
+# Prefer a window? The desktop GUI wraps the same pipeline (tkinter; no new dependencies)
+exfiltrack-gui
 ```
 
 See [docs/user-guide.md](docs/user-guide.md).

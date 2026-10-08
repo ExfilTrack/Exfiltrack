@@ -51,6 +51,7 @@ Issues = "https://github.com/ExfilTrack/Exfiltrack/issues"
 
 [project.scripts]
 exfiltrack = "exfiltrack.cli:main"
+exfiltrack-gui = "exfiltrack.gui.app:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
