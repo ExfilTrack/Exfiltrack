@@ -130,7 +130,7 @@ def render_html_report(
         raise ReportError(f"Cannot read stylesheet '{css_path}': {exc}") from exc
 
     when = generated_at or datetime.now(tz=manifest.start_time.tzinfo)
-    html_limitations = Markup(markdown.markdown(limitations_text))
+    html_limitations = Markup(markdown.markdown(limitations_text, extensions=['tables', 'fenced_code']))
     html = template.render(
         findings=findings,
         manifest=manifest,
