@@ -15,7 +15,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import markdown
+import markdown  # type: ignore
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
 

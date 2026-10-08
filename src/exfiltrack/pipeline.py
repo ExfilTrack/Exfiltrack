@@ -183,7 +183,7 @@ def _sanitize_string(s: str) -> str:
 
 
 def _sanitize_dict(d: dict[str, Any]) -> dict[str, Any]:
-    sanitized = {}
+    sanitized: dict[str, Any] = {}
     for k, v in d.items():
         if isinstance(v, str):
             sanitized[k] = _sanitize_string(v)
