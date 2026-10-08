@@ -42,6 +42,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="exfiltrack",
         description="Offline, read-only triage for possible USB-based data exfiltration.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -79,6 +80,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("version", help="Print the tool name and version.")
+    parser.epilog = (
+        "Analyze command:\n"
+        f"{analyze.format_help()}\n"
+        "Verify command:\n"
+        f"{verify.format_help()}\n"
+        "Examples:\n"
+        "  exfiltrack analyze --evidence ./evidence --case-dir ./cases/CASE-001 "
+        '--case-id CASE-001 --examiner "Your Name"\n'
+        "  exfiltrack verify --case-dir ./cases/CASE-001\n"
+        "  exfiltrack version\n\n"
+        "For command-specific help, use: exfiltrack <command> --help"
+    )
     return parser
 
 

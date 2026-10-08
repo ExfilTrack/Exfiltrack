@@ -34,6 +34,66 @@ def _install_one_artifact(monkeypatch: pytest.MonkeyPatch, evidence_dir: Path) -
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("help_flag", ["-h", "--help"])
+def test_top_level_help_includes_command_options_and_examples(
+    help_flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main([help_flag])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    for text in (
+        "Analyze command:",
+        "Verify command:",
+        "--evidence DIR",
+        "--case-dir DIR",
+        "--case-id CASE_ID",
+        "--examiner EXAMINER",
+        "Directory of offline Windows artifacts",
+        "case_manifest.json",
+        "exfiltrack analyze --evidence ./evidence",
+        '--examiner "Your Name"',
+        "exfiltrack verify --case-dir ./cases/CASE-001",
+        "exfiltrack version",
+        "exfiltrack <command> --help",
+    ):
+        assert text in captured.out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", ["analyze", "verify", "version"])
+@pytest.mark.parametrize("help_flag", ["-h", "--help"])
+def test_command_help_remains_specific_to_the_command(
+    command: str, help_flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main([command, help_flag])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"usage: exfiltrack {command}" in captured.out
+    assert "Analyze command:" not in captured.out
+    assert "Examples:" not in captured.out
+    assert ("--evidence" in captured.out) == (command == "analyze")
+    assert ("--case-dir" in captured.out) == (command in {"analyze", "verify"})
+
+
+@pytest.mark.unit
+def test_analyze_still_requires_all_case_arguments(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["analyze"])
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    for flag in ("--evidence", "--case-dir", "--case-id", "--examiner"):
+        assert flag in captured.err
+
+
+@pytest.mark.unit
 def test_version_command_prints_tool_name_and_version(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["version"])
 
