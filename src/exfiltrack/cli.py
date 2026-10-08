@@ -128,7 +128,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
         case_id=args.case_id,
         examiner=args.examiner,
     )
-    result = run_pipeline(config)
+    result = run_pipeline(config, continue_on_parser_error=True)
     _print_analyze_summary(result)
     return _EXIT_OK
 

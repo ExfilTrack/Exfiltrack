@@ -243,10 +243,12 @@ def run_pipeline(
             (Non-Negotiable #4: malformed input is never silently skipped).
     """
     evidence_dir = config.resolved_evidence_dir
+    print("Discovering artifacts...")
     artifacts = discover_artifacts(evidence_dir)
     if not artifacts:
         raise PipelineError(f"No evidence artifacts found under '{evidence_dir}'.")
 
+    print(f"Hashing {len(artifacts)} discovered artifacts for intake manifest...")
     manifest = CaseManifest.from_config(config, artifacts, start_time=start_time)
     if acquisition is not None:
         _verify_acquisition(manifest, acquisition)
@@ -254,13 +256,16 @@ def run_pipeline(
 
     events: list[NormalizedEvent] = []
     parser_records: dict[tuple[str, str], ParserRecord] = {}
-    for artifact in artifacts:
+    total_artifacts = len(artifacts)
+    for i, artifact in enumerate(artifacts, 1):
         parse = _DISPATCH.get(artifact.artifact_type)
         if parse is None:
             # Unrecognised file: discovered and hashed into the manifest,
             # but there is no parser to route it to.
             continue
         module = _PARSER_MODULES[artifact.artifact_type]
+        safe_name = artifact.path.name.encode("utf-8", "backslashreplace").decode("utf-8")
+        print(f"Parsing {i}/{total_artifacts}: {safe_name}...")
         key = (module.PARSER_NAME, module.PARSER_VERSION)
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
         try:
@@ -285,8 +290,13 @@ def run_pipeline(
 
     manifest.parser_records = [parser_records[key] for key in sorted(parser_records)]
 
+    print(f"Normalizing and sorting {len(events)} events into timeline...")
     timeline = sort_events(events)
+
+    print("Reconstructing USB sessions...")
     sessions = reconstruct_sessions(timeline, config=session_config)
+
+    print(f"Scoring and evaluating confidence for {len(sessions)} sessions...")
     findings = assemble_findings(
         sessions,
         weights=scoring_weights,
@@ -294,6 +304,7 @@ def run_pipeline(
         destination_file_hashes=destination_file_hashes,
     )
 
+    print("Re-hashing evidence to verify integrity (post-analysis)...")
     manifest.post_analysis_digests = [
         DigestRecord(path=record.path, digest=hash_file(evidence_dir / record.path))
         for record in manifest.intake_digests
@@ -307,6 +318,7 @@ def run_pipeline(
 
     report_paths: dict[str, Path] = {}
     if write_reports:
+        print("Generating case reports (Manifest, JSON, CSV, HTML)...")
         output_dir = config.resolved_case_output_dir
         report_paths["manifest"] = write_manifest(manifest, output_dir)
         report_paths["json"] = write_json_report(list(findings), manifest, output_dir)
@@ -320,6 +332,7 @@ def run_pipeline(
             output_dir,
             generated_at=generated_at,
         )
+        print(f"Reports successfully written to: {output_dir}")
 
     return PipelineResult(
         manifest=manifest,

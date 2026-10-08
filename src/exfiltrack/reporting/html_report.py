@@ -15,7 +15,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 from exfiltrack.config import ExfilTrackError
 from exfiltrack.evidence.manifest import CaseManifest
@@ -128,10 +130,13 @@ def render_html_report(
         raise ReportError(f"Cannot read stylesheet '{css_path}': {exc}") from exc
 
     when = generated_at or datetime.now(tz=manifest.start_time.tzinfo)
+    html_limitations = Markup(
+        markdown.markdown(limitations_text, extensions=["tables", "fenced_code"])
+    )
     html = template.render(
         findings=findings,
         manifest=manifest,
-        limitations_text=limitations_text,
+        limitations_text=html_limitations,
         inline_css=inline_css,
         generated_at=when,
         tool_name=manifest.tool_name,

@@ -32,6 +32,7 @@ dependencies = [
     "LnkParse3==1.4.0",
     "Jinja2==3.1.4",
     "olefile==0.47",
+    "markdown>=3.0",
 ]
 
 [project.optional-dependencies]
