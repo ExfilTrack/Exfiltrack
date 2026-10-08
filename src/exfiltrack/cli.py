@@ -192,7 +192,9 @@ def _print_analyze_summary(result: PipelineResult) -> None:
             "results are PARTIAL."
         )
         for error in manifest.parser_errors:
-            print(f"  parser error: {error['source_artifact']}: {error['message']}")
+            source = error['source_artifact'].encode("ascii", "backslashreplace").decode("ascii")
+            msg = error['message'].encode("ascii", "backslashreplace").decode("ascii")
+            print(f"  parser error: {source}: {msg}")
     print(f"Evidence integrity: {manifest.integrity_verdict.value}")
     for name in sorted(result.report_paths):
         print(f"  {name}: {result.report_paths[name]}")
