@@ -264,7 +264,7 @@ def run_pipeline(
             # but there is no parser to route it to.
             continue
         module = _PARSER_MODULES[artifact.artifact_type]
-        safe_name = artifact.path.name.encode('utf-8', 'backslashreplace').decode('utf-8')
+        safe_name = artifact.path.name.encode("utf-8", "backslashreplace").decode("utf-8")
         print(f"Parsing {i}/{total_artifacts}: {safe_name}...")
         key = (module.PARSER_NAME, module.PARSER_VERSION)
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
