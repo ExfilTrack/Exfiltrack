@@ -11,10 +11,9 @@ previously tied them into one run. :func:`run_pipeline` is that wiring, and
 it is what #13's integration tests exercise end to end rather than
 re-implementing the wiring themselves.
 
-``cli.py`` still raises ``NotImplementedError``. Wiring its ``analyze``
-command to :func:`run_pipeline` is a small, separate follow-up -- out of
-scope for #13, which only requires the pipeline to be runnable, not that it
-have a command-line front end yet.
+``cli.py`` drives :func:`run_pipeline` for both ``analyze --evidence`` (strict:
+the first malformed artifact aborts the run) and ``analyze --auto`` (live
+collection: a failing artifact is recorded and the run continues).
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from exfiltrack.config import (
     CaseConfig,
@@ -80,6 +80,47 @@ _PARSER_MODULES: dict[ArtifactType, ModuleType] = {
     ArtifactType.LNK: lnk_parser,
     ArtifactType.JUMP_LIST: jumplist_parser,
 }
+
+
+def _verify_acquisition(manifest: CaseManifest, acquisition: dict[str, Any]) -> None:
+    """Check intake digests against what live acquisition recorded it collected.
+
+    The acquisition manifest hashed each snapshot when it was written; intake
+    hashes the same files again. Any difference, missing snapshot, or extra
+    file means the evidence changed between collection and analysis.
+
+    Raises:
+        PipelineError: If the evidence directory does not match the acquisition
+            manifest exactly.
+    """
+    expected: dict[str, str] = {}
+    for record in acquisition.get("records", []):
+        if record.get("status") != "collected":
+            continue
+        destination, digest = record.get("destination"), record.get("sha256")
+        if not isinstance(destination, str) or not isinstance(digest, str):
+            raise PipelineError(
+                "Acquisition manifest has a collected record without destination and sha256."
+            )
+        expected[destination] = digest.lower()
+    actual = {record.path: record.digest.lower() for record in manifest.intake_digests}
+
+    problems = [
+        f"missing since collection: {path}" for path in sorted(expected.keys() - actual.keys())
+    ]
+    problems += [
+        f"not recorded by acquisition: {path}" for path in sorted(actual.keys() - expected.keys())
+    ]
+    problems += [
+        f"digest differs from acquisition: {path}"
+        for path in sorted(expected.keys() & actual.keys())
+        if expected[path] != actual[path]
+    ]
+    if problems:
+        raise PipelineError(
+            "Collected evidence no longer matches the acquisition manifest; refusing to "
+            "analyze it. " + "; ".join(problems)
+        )
 
 
 def _default_limitations_text() -> str:
@@ -148,6 +189,8 @@ def run_pipeline(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     generated_at: datetime | None = None,
+    acquisition: dict[str, Any] | None = None,
+    continue_on_parser_error: bool = False,
 ) -> PipelineResult:
     """Run the full ExfilTrack analysis pipeline for one case, start to finish.
 
@@ -177,6 +220,16 @@ def run_pipeline(
             is a Non-Negotiable (#5) and part of #13's Definition of Done --
             must pass fixed values here, since wall-clock time is otherwise
             not reproducible.
+        acquisition: The live-acquisition manifest, when ``config.evidence_dir``
+            was produced by :func:`exfiltrack.evidence.live.collect_live_evidence`.
+            Intake digests are checked against it before parsing, and it is
+            embedded in the case manifest and reports.
+        continue_on_parser_error: When ``True``, an artifact whose parser raises
+            an :class:`~exfiltrack.config.ExfilTrackError` is recorded in
+            ``manifest.parser_errors`` and skipped, and the run continues with
+            the remaining artifacts. It contributes no events at all (partial
+            output from a failing parser is discarded). When ``False`` (the
+            default, used for manual analysis) the error propagates.
 
     Returns:
         A :class:`PipelineResult` holding every intermediate and final
@@ -197,6 +250,9 @@ def run_pipeline(
 
     print(f"Hashing {len(artifacts)} discovered artifacts for intake manifest...")
     manifest = CaseManifest.from_config(config, artifacts, start_time=start_time)
+    if acquisition is not None:
+        _verify_acquisition(manifest, acquisition)
+        manifest.acquisition = acquisition
 
     events: list[NormalizedEvent] = []
     parser_records: dict[tuple[str, str], ParserRecord] = {}
@@ -210,13 +266,27 @@ def run_pipeline(
         module = _PARSER_MODULES[artifact.artifact_type]
         safe_name = artifact.path.name.encode('utf-8', 'backslashreplace').decode('utf-8')
         print(f"Parsing {i}/{total_artifacts}: {safe_name}...")
-        try:
-            events.extend(parse(artifact.path))
-        except ExfilTrackError as e:
-            print(f"  -> Skipping {safe_name} due to parse error: {e}")
-            continue
         key = (module.PARSER_NAME, module.PARSER_VERSION)
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
+        try:
+            # Fully consumed before extending, so a parser that fails midway
+            # contributes nothing rather than a misleading partial timeline.
+            artifact_events = list(parse(artifact.path))
+        except ExfilTrackError as exc:
+            if not continue_on_parser_error:
+                raise
+            manifest.parser_errors.append(
+                {
+                    "source_artifact": artifact.path.as_posix(),
+                    "artifact_type": artifact.artifact_type.value,
+                    "parser_name": key[0],
+                    "parser_version": key[1],
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
+            continue
+        events.extend(artifact_events)
 
     manifest.parser_records = [parser_records[key] for key in sorted(parser_records)]
 

@@ -6,12 +6,17 @@ Related issues: #1 - Repository Initialization, #13 - Integration Testing
 Commands::
 
     exfiltrack analyze --evidence <dir> --case-dir <dir> --case-id <id> --examiner <name>
+    exfiltrack analyze --auto          --case-dir <dir> --case-id <id> --examiner <name>
     exfiltrack verify  --case-dir <dir>
     exfiltrack version
 
-``analyze`` runs the full pipeline (:func:`exfiltrack.pipeline.run_pipeline`)
+``analyze --evidence`` runs the full pipeline (:func:`exfiltrack.pipeline.run_pipeline`)
 against an offline evidence directory and writes the case manifest and
-reports. ``verify`` re-checks a previously written case's evidence digests
+reports. ``analyze --auto`` first collects the relevant artifacts from the
+running, elevated Windows machine into a new case directory
+(:func:`exfiltrack.evidence.live.collect_live_evidence`), then runs the same
+pipeline on those snapshots; ``--case-dir`` is then the case root holding
+``evidence/``, ``reports/`` and ``acquisition_manifest.json``. ``verify`` re-checks a previously written case's evidence digests
 without re-running analysis, for a later chain-of-custody check. Domain
 errors (:class:`~exfiltrack.config.ExfilTrackError` and its subclasses --
 malformed evidence, an invalid case configuration, a failed report render)
@@ -31,6 +36,7 @@ from pathlib import Path
 from exfiltrack import __tool_name__, __version__
 from exfiltrack.config import CaseConfig, ExfilTrackError
 from exfiltrack.evidence.hashing import DigestMismatchError, verify_digest
+from exfiltrack.evidence.live import collect_live_evidence
 from exfiltrack.evidence.manifest import MANIFEST_FILENAME
 from exfiltrack.pipeline import PipelineResult, run_pipeline
 
@@ -49,19 +55,32 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser(
         "analyze", help="Run the full pipeline against an offline evidence directory."
     )
-    analyze.add_argument(
+    source = analyze.add_mutually_exclusive_group(required=True)
+    source.add_argument(
         "--evidence",
-        required=True,
         type=Path,
         metavar="DIR",
         help="Directory of offline Windows artifacts, opened read-only.",
+    )
+    source.add_argument(
+        "--auto",
+        action="store_true",
+        help=(
+            "Collect the relevant artifacts from this running Windows machine "
+            "(requires an elevated terminal), then analyze them. Logging and "
+            "auditing are never enabled or changed."
+        ),
     )
     analyze.add_argument(
         "--case-dir",
         required=True,
         type=Path,
         metavar="DIR",
-        help="Output directory for the manifest and reports. Must not be inside --evidence.",
+        help=(
+            "With --evidence: output directory for the manifest and reports, which must "
+            "not be inside --evidence. With --auto: a new case directory that must not "
+            "already exist; reports are written to its reports/ folder."
+        ),
     )
     analyze.add_argument("--case-id", required=True, help="Analyst-supplied case identifier.")
     analyze.add_argument(
@@ -76,7 +95,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         metavar="DIR",
-        help=f"Case directory containing {MANIFEST_FILENAME}.",
+        help=(
+            f"Case directory containing {MANIFEST_FILENAME} (for an --auto case, the case "
+            "directory itself is accepted; its reports/ folder is used)."
+        ),
     )
 
     subparsers.add_parser("version", help="Print the tool name and version.")
@@ -88,6 +110,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Examples:\n"
         "  exfiltrack analyze --evidence ./evidence --case-dir ./cases/CASE-001 "
         '--case-id CASE-001 --examiner "Your Name"\n'
+        "  exfiltrack analyze --auto --case-dir ./cases/CASE-002 "
+        '--case-id CASE-002 --examiner "Your Name"   (elevated Windows terminal)\n'
         "  exfiltrack verify --case-dir ./cases/CASE-001\n"
         "  exfiltrack version\n\n"
         "For command-specific help, use: exfiltrack <command> --help"
@@ -96,13 +120,53 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
+    if args.auto:
+        return _run_auto(args)
     config = CaseConfig(
         evidence_dir=args.evidence,
         case_output_dir=args.case_dir,
         case_id=args.case_id,
         examiner=args.examiner,
     )
-    result = run_pipeline(config)
+    result = run_pipeline(config, continue_on_parser_error=True)
+    _print_analyze_summary(result)
+    return _EXIT_OK
+
+
+def _run_auto(args: argparse.Namespace) -> int:
+    """Collect artifacts from this machine into a fresh case, then analyze them.
+
+    Collection and analysis stay separate: the pipeline only ever reads the
+    collected snapshots, never the live files. Parser failures on individual
+    snapshots are recorded and reported rather than discarding the whole case.
+    """
+    print("Collecting artifacts from this machine (read-only; no logging is changed)...")
+    acquisition = collect_live_evidence(args.case_dir, case_id=args.case_id, examiner=args.examiner)
+    gaps = [
+        record
+        for record in acquisition.manifest["records"]
+        if record["status"] in {"missing", "unavailable", "error"}
+        or record.get("metadata", {}).get("channel_enabled") is False
+    ]
+    collected = sum(1 for r in acquisition.manifest["records"] if r["status"] == "collected")
+    print(f"Collection coverage:  {acquisition.manifest['coverage']}")
+    print(f"Sources collected:    {collected}")
+    for record in gaps:
+        reason = record.get("message") or record["status"]
+        print(f"  gap: [{record['category']}] {record['source']}: {reason}")
+    print(f"Acquisition manifest: {acquisition.manifest_path}")
+
+    config = CaseConfig(
+        evidence_dir=acquisition.evidence_dir,
+        case_output_dir=acquisition.reports_dir,
+        case_id=args.case_id,
+        examiner=args.examiner,
+    )
+    result = run_pipeline(
+        config,
+        acquisition=acquisition.manifest,
+        continue_on_parser_error=True,
+    )
     _print_analyze_summary(result)
     return _EXIT_OK
 
@@ -122,6 +186,13 @@ def _print_analyze_summary(result: PipelineResult) -> None:
     for label in sorted(counts):
         print(f"  {label}: {counts[label]}")
 
+    if manifest.parser_errors:
+        print(
+            f"WARNING: {len(manifest.parser_errors)} artifact(s) could not be parsed; "
+            "results are PARTIAL."
+        )
+        for error in manifest.parser_errors:
+            print(f"  parser error: {error['source_artifact']}: {error['message']}")
     print(f"Evidence integrity: {manifest.integrity_verdict.value}")
     for name in sorted(result.report_paths):
         print(f"  {name}: {result.report_paths[name]}")
@@ -137,6 +208,9 @@ def _run_verify(args: argparse.Namespace) -> int:
     """
     case_dir = args.case_dir.resolve()
     manifest_path = case_dir / MANIFEST_FILENAME
+    auto_manifest_path = case_dir / "reports" / MANIFEST_FILENAME
+    if not manifest_path.exists() and auto_manifest_path.exists():
+        manifest_path = auto_manifest_path
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
