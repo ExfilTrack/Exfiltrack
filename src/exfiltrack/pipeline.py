@@ -19,7 +19,7 @@ collection: a failing artifact is recorded and the run continues).
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
@@ -177,6 +177,49 @@ class PipelineResult:
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_string(s: str) -> str:
+    """Escape surrogate characters to avoid UnicodeEncodeError in reports."""
+    return s.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _sanitize_dict(d: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(v, str):
+            sanitized[k] = _sanitize_string(v)
+        elif isinstance(v, dict):
+            sanitized[k] = _sanitize_dict(v)
+        elif isinstance(v, list):
+            sanitized[k] = [_sanitize_string(i) if isinstance(i, str) else i for i in v]
+        else:
+            sanitized[k] = v
+    return sanitized
+
+
+def _sanitize_event(event: NormalizedEvent) -> NormalizedEvent:
+    """Sanitize surrogate unicode characters from event strings."""
+    changes: dict[str, Any] = {}
+    if event.file_path:
+        changes["file_path"] = _sanitize_string(event.file_path)
+    if event.source_artifact:
+        changes["source_artifact"] = _sanitize_string(event.source_artifact)
+    if event.details:
+        changes["details"] = _sanitize_dict(event.details)
+    if event.device:
+        dev = event.device
+        dev_changes = {}
+        for f in ["device_id", "serial_number", "vendor", "product", "friendly_name"]:
+            val = getattr(dev, f)
+            if val:
+                dev_changes[f] = _sanitize_string(val)
+        if dev_changes:
+            changes["device"] = replace(dev, **dev_changes)
+
+    if changes:
+        return replace(event, **changes)
+    return event
+
+
 def run_pipeline(
     config: CaseConfig,
     *,
@@ -264,14 +307,14 @@ def run_pipeline(
             # but there is no parser to route it to.
             continue
         module = _PARSER_MODULES[artifact.artifact_type]
-        safe_name = artifact.path.name.encode("utf-8", "backslashreplace").decode("utf-8")
+        safe_name = artifact.path.name.encode("ascii", "backslashreplace").decode("ascii")
         print(f"Parsing {i}/{total_artifacts}: {safe_name}...")
         key = (module.PARSER_NAME, module.PARSER_VERSION)
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
         try:
             # Fully consumed before extending, so a parser that fails midway
             # contributes nothing rather than a misleading partial timeline.
-            artifact_events = list(parse(artifact.path))
+            artifact_events = [_sanitize_event(ev) for ev in parse(artifact.path)]
         except ExfilTrackError as exc:
             if not continue_on_parser_error:
                 raise
