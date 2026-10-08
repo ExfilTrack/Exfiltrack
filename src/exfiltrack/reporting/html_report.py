@@ -15,9 +15,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
-import markdown
 
 from exfiltrack.config import ExfilTrackError
 from exfiltrack.evidence.manifest import CaseManifest
