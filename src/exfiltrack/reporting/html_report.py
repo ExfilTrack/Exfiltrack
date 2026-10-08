@@ -200,7 +200,7 @@ def write_html_report(
     destination = case_output_dir.resolve() / REPORT_FILENAME
     try:
         case_output_dir.mkdir(parents=True, exist_ok=True)
-        destination.write_text(html, encoding="utf-8")
+        destination.write_text(html, encoding="utf-8", errors="backslashreplace")
     except OSError as exc:
         raise ReportError(f"Cannot write HTML report to '{destination}': {exc}") from exc
     return destination
