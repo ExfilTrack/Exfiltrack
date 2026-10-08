@@ -3,7 +3,7 @@
 **Owner:** Dabarera G. D. M. (Maheesha)
 **Tracking issue:** #14 - Final Documentation
 
-Status: outline. The CLI is not implemented yet, so the commands below describe the planned interface. Fill in real output as features land.
+Status: outline. `analyze` (manual and `--auto`), `verify`, and `version` are implemented; sections marked _To document_ are still being written.
 
 ---
 
@@ -66,11 +66,44 @@ exfiltrack analyze \
 
 _To document: full flag reference, exit codes, and what appears on stdout._
 
+## Automatic Collection on a Live Windows Machine (`--auto`)
+
+Instead of exporting evidence by hand, `--auto` collects the relevant artifacts from the machine it runs on, stores them as snapshots in a new case, and analyzes those snapshots.
+
+```powershell
+# Run from an elevated (Administrator) terminal
+exfiltrack analyze --auto --case-dir D:\Cases\CASE-002 --case-id CASE-002 --examiner "Your Name"
+```
+
+`--auto` replaces `--evidence`; the two cannot be combined. `--case-dir` must **not already exist** and must not be inside a Windows or user-profile directory. ExfilTrack creates:
+
+```
+CASE-002/
+├── evidence/                 collected snapshots (never modified afterwards)
+│   ├── evtx/                 System, Security, DriverFrameworks-UserMode/Operational
+│   ├── registry/             SYSTEM, SOFTWARE
+│   └── users/<SID>/          NTUSER.DAT, Recent/*.lnk, Recent/*Destinations/*
+├── reports/                  report.html, findings.json, findings.csv, timeline.csv, case_manifest.json
+└── acquisition_manifest.json what was collected, how, and what could not be
+```
+
+Only standard locations are examined (event logs via `wevtutil`, `SYSTEM`/`SOFTWARE` and loaded user hives via `reg save`, and each registered profile's `NTUSER.DAT`, `Recent`, and Jump List folders). There is no full-disk scan.
+
+**What auto mode does not do**
+
+- It never enables logging or auditing and never clears or modifies logs. If a channel such as `Microsoft-Windows-DriverFrameworks-UserMode/Operational` is disabled, it is collected anyway and flagged in the report. Events that were never recorded cannot be recovered by enabling logging afterwards, so configure auditing (see [organizational-prerequisites.md](organizational-prerequisites.md)) **before** the activity you want to investigate.
+- It does not verify that file-access auditing or SACLs were in effect; absence of file-access events is not evidence that no files were accessed.
+- Collection is not an atomic snapshot, and running it creates activity on the machine. The integrity verdict covers the collected snapshots, not the live system.
+
+**Reading the result.** The console and the report's *Evidence Coverage* section show `complete` or `partial` coverage and list each source that was missing, denied, or failed. If an individual snapshot cannot be parsed, it is listed as a parser error, the report is marked *Partial analysis*, and the remaining artifacts are still analyzed. Before parsing, every snapshot is re-hashed against `acquisition_manifest.json`; if any file changed or was added since collection, analysis is refused.
+
 ## Verifying Integrity
 
 ```bash
 exfiltrack verify --case-dir ./cases/CASE-001
 ```
+
+For an `--auto` case, pass the case directory itself; its `reports/case_manifest.json` is used.
 
 _To document: what a pass and a failure look like, and what to do if digests do not match._
 
