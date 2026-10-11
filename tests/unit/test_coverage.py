@@ -28,6 +28,8 @@ from exfiltrack.reporting.coverage import (
 )
 from tests.unit.factories import make_device, make_file_event, make_insert_event, utc
 
+LIMITATIONS_TEXT = "Temporal correlation alone does not prove that a file was copied."
+
 
 def _artifact(tmp_path: Path, name: str, artifact_type: ArtifactType) -> ArtifactRecord:
     """An intake record for *name*; the file need not exist for coverage math."""
@@ -194,3 +196,110 @@ def test_other_evtx_bucket_appears_only_when_supplied(tmp_path: Path) -> None:
     with_other = _by_source(build_coverage([artifact], events))
     assert with_other[EVTX_OTHER].status is SourceStatus.PRESENT
     assert with_other[EVTX_OTHER].event_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Rendering: HTML section and CSV table
+# ---------------------------------------------------------------------------
+
+
+def _mixed_coverage() -> EvidenceCoverage:
+    return EvidenceCoverage(
+        sources=(
+            SourceCoverage(REGISTRY, SourceStatus.PRESENT, 2, 2, 150),
+            SourceCoverage(
+                EVTX_DRIVERFRAMEWORKS,
+                SourceStatus.ABSENT,
+                0,
+                0,
+                0,
+                "The DriverFrameworks channel is disabled by default.",
+            ),
+            SourceCoverage(
+                EVTX_SECURITY,
+                SourceStatus.EMPTY,
+                1,
+                1,
+                0,
+                "Supplied but contained 0 file-access events.",
+            ),
+            SourceCoverage(LNK, SourceStatus.PRESENT, 37, 37, 37),
+            SourceCoverage(JUMPLISTS, SourceStatus.ABSENT, 0, 0, 0, "No Jump Lists supplied."),
+        )
+    )
+
+
+@pytest.mark.unit
+def test_html_report_renders_source_coverage_section() -> None:
+    from exfiltrack.evidence.manifest import CaseManifest
+    from exfiltrack.reporting.html_report import render_html_report
+
+    manifest = CaseManifest(
+        case_id="CASE-001", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0)
+    )
+    manifest.coverage = _mixed_coverage().to_dict()
+
+    html = render_html_report([], manifest, LIMITATIONS_TEXT)
+
+    section = html.split('id="source-coverage"', 1)[1].split("</section>", 1)[0]
+    assert "Evidence Coverage by Source" in section
+    assert "Evidence coverage is not complete." in section
+    assert 'badge-source-present' in section
+    assert 'badge-source-absent' in section
+    assert 'badge-source-empty' in section
+    assert "disabled by default" in section
+    assert "registry" in section
+
+
+@pytest.mark.unit
+def test_html_report_omits_source_coverage_when_manifest_has_none() -> None:
+    from exfiltrack.evidence.manifest import CaseManifest
+    from exfiltrack.reporting.html_report import render_html_report
+
+    manifest = CaseManifest(
+        case_id="CASE-001", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0)
+    )
+    html = render_html_report([], manifest, LIMITATIONS_TEXT)
+    assert 'id="source-coverage"' not in html
+
+
+@pytest.mark.unit
+def test_html_report_hides_coverage_warning_when_complete() -> None:
+    from exfiltrack.evidence.manifest import CaseManifest
+    from exfiltrack.reporting.html_report import render_html_report
+
+    manifest = CaseManifest(
+        case_id="CASE-001", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0)
+    )
+    manifest.coverage = EvidenceCoverage(
+        sources=(SourceCoverage(REGISTRY, SourceStatus.PRESENT, 1, 1, 3),)
+    ).to_dict()
+    html = render_html_report([], manifest, LIMITATIONS_TEXT)
+    section = html.split('id="source-coverage"', 1)[1].split("</section>", 1)[0]
+    assert "Evidence coverage is not complete." not in section
+
+
+@pytest.mark.unit
+def test_coverage_csv_round_trips_all_rows(tmp_path: Path) -> None:
+    import csv as csv_module
+
+    from exfiltrack.reporting.csv_report import render_coverage_csv, write_coverage_csv
+
+    coverage = _mixed_coverage()
+    text = render_coverage_csv(coverage)
+    rows = list(csv_module.DictReader(text.splitlines()))
+    assert [row["source"] for row in rows] == [
+        REGISTRY,
+        EVTX_DRIVERFRAMEWORKS,
+        EVTX_SECURITY,
+        LNK,
+        JUMPLISTS,
+    ]
+    assert rows[1]["status"] == "absent"
+    assert rows[1]["supplied"] == "0"
+    assert "disabled by default" in rows[1]["note"]
+    assert render_coverage_csv(coverage) == text  # deterministic
+
+    written = write_coverage_csv(coverage, tmp_path)
+    assert written.name == "coverage.csv"
+    assert written.read_text(encoding="utf-8") == text
