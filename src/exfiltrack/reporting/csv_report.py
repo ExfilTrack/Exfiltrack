@@ -36,6 +36,10 @@ FINDINGS_COLUMNS = (
     "rule_points",
     "rule_source_artifacts",
     "rule_explanation",
+    # Issue #35: boundary evidence classes and the partial-coverage reasons.
+    "boundary_start_source",
+    "boundary_end_source",
+    "partial_coverage_reasons",
 )
 
 TIMELINE_COLUMNS = (
@@ -69,6 +73,9 @@ def _findings_rows(findings: list[Finding]) -> list[dict[str, str]]:
             "total_score": str(finding.scored_session.total_score),
             "confidence_level": finding.confidence.level.name,
             "confidence_reason": finding.confidence.reason,
+            "boundary_start_source": session.boundary_sources[0],
+            "boundary_end_source": session.boundary_sources[1],
+            "partial_coverage_reasons": "; ".join(session.partial_coverage_reasons),
         }
         contributions = finding.scored_session.contributions
         if not contributions:

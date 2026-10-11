@@ -108,3 +108,96 @@ def test_confidence_is_not_capped_by_the_marker() -> None:
     assert scored.total_score == 95
     assert confidence.level is ConfidenceLevel.HIGH
     assert scored.partial_coverage is True
+
+
+# ---------------------------------------------------------------------------
+# Rendering: the marker must reach all three report formats (issue #35 DoD)
+# ---------------------------------------------------------------------------
+
+LIMITATIONS_TEXT = "Temporal correlation alone does not prove that a file was copied."
+
+
+def _clean_events() -> list:
+    device = make_device()
+    base = utc(2026, 3, 1, 9, 0, 0)
+    return [make_insert_event(base, device), make_remove_event(base + timedelta(minutes=10), device)]
+
+
+def _manifest():  # type: ignore[no-untyped-def]
+    from exfiltrack.evidence.manifest import CaseManifest
+
+    return CaseManifest(case_id="CASE-001", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0))
+
+
+@pytest.mark.unit
+def test_json_finding_carries_boundary_sources_and_reasons() -> None:
+    from exfiltrack.reporting.json_report import build_json_report
+    from exfiltrack.reporting.model import assemble_findings
+
+    findings = assemble_findings(reconstruct_sessions(_registry_bounded_events()))
+    payload = build_json_report(findings, _manifest())
+    [finding] = payload["findings"]
+
+    assert finding["boundary_sources"] == ["registry_properties", "registry_properties"]
+    assert len(finding["partial_coverage"]) == 2
+    assert any("0066/0067" in reason for reason in finding["partial_coverage"])
+
+
+@pytest.mark.unit
+def test_csv_rows_carry_the_marker() -> None:
+    import csv as csv_module
+
+    from exfiltrack.reporting.csv_report import FINDINGS_COLUMNS, render_findings_csv
+    from exfiltrack.reporting.model import assemble_findings
+
+    findings = assemble_findings(reconstruct_sessions(_registry_bounded_events()))
+    text = render_findings_csv(findings)
+    rows = list(csv_module.DictReader(text.splitlines()))
+
+    assert "boundary_start_source" in FINDINGS_COLUMNS
+    assert "boundary_end_source" in FINDINGS_COLUMNS
+    assert "partial_coverage_reasons" in FINDINGS_COLUMNS
+    assert rows[0]["boundary_start_source"] == "registry_properties"
+    assert rows[0]["boundary_end_source"] == "registry_properties"
+    assert "0066/0067" in rows[0]["partial_coverage_reasons"]
+
+
+@pytest.mark.unit
+def test_csv_clean_session_has_empty_marker() -> None:
+    import csv as csv_module
+
+    from exfiltrack.reporting.csv_report import render_findings_csv
+    from exfiltrack.reporting.model import assemble_findings
+
+    findings = assemble_findings(reconstruct_sessions(_clean_events()))
+    rows = list(csv_module.DictReader(render_findings_csv(findings).splitlines()))
+    assert rows[0]["boundary_start_source"] == "event_log"
+    assert rows[0]["boundary_end_source"] == "event_log"
+    assert rows[0]["partial_coverage_reasons"] == ""
+
+
+@pytest.mark.unit
+def test_html_renders_the_marker_beside_the_level() -> None:
+    from exfiltrack.reporting.html_report import render_html_report
+    from exfiltrack.reporting.model import assemble_findings
+
+    findings = assemble_findings(reconstruct_sessions(_registry_bounded_events()))
+    html = render_html_report(findings, _manifest(), LIMITATIONS_TEXT)
+
+    assert "boundary-warning" in html
+    assert "Partial coverage." in html
+    assert "0066/0067" in html
+    assert "not directly comparable" in html
+
+
+@pytest.mark.unit
+def test_html_omits_marker_for_event_log_bounded_sessions() -> None:
+    from exfiltrack.reporting.html_report import render_html_report
+    from exfiltrack.reporting.model import assemble_findings
+
+    findings = assemble_findings(reconstruct_sessions(_clean_events()))
+    html = render_html_report(findings, _manifest(), LIMITATIONS_TEXT)
+    # The stylesheet always inlines the .boundary-warning rule; assert on the
+    # element markup, which exists only when the marker renders.
+    assert '<div class="boundary-warning"' not in html
+    assert "Partial coverage." not in html
