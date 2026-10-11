@@ -46,6 +46,7 @@ def make_insert_event(
     device: UsbDevice,
     *,
     source_artifact: str = "evidence/logs/System.evtx",
+    details: dict[str, object] | None = None,
 ) -> NormalizedEvent:
     return NormalizedEvent(
         event_type=EventType.USB_INSERT.value,
@@ -55,6 +56,7 @@ def make_insert_event(
         parser_name=PARSER_NAME,
         parser_version=PARSER_VERSION,
         device=device,
+        details=dict(details) if details else {},
     )
 
 
@@ -63,6 +65,7 @@ def make_remove_event(
     device: UsbDevice,
     *,
     source_artifact: str = "evidence/logs/System.evtx",
+    details: dict[str, object] | None = None,
 ) -> NormalizedEvent:
     return NormalizedEvent(
         event_type=EventType.USB_REMOVE.value,
@@ -72,6 +75,7 @@ def make_remove_event(
         parser_name=PARSER_NAME,
         parser_version=PARSER_VERSION,
         device=device,
+        details=dict(details) if details else {},
     )
 
 

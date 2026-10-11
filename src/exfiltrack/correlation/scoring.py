@@ -62,6 +62,21 @@ class ScoredSession:
         """Sum of every contribution's points."""
         return sum(c.points for c in self.contributions)
 
+    @property
+    def boundary_sources(self) -> tuple[str, str]:
+        """Forwarded from the session, so the marker travels with the score (#35)."""
+        return self.session.boundary_sources
+
+    @property
+    def partial_coverage_reasons(self) -> tuple[str, ...]:
+        """Forwarded from the session, so the marker travels with the score (#35)."""
+        return self.session.partial_coverage_reasons
+
+    @property
+    def partial_coverage(self) -> bool:
+        """Forwarded from the session, so the marker travels with the score (#35)."""
+        return self.session.partial_coverage
+
 
 def _matches_extension(file_path: str, extensions: frozenset[str]) -> bool:
     suffix = PureWindowsPath(file_path).suffix.lower()
