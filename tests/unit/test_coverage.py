@@ -244,9 +244,9 @@ def test_html_report_renders_source_coverage_section() -> None:
     section = html.split('id="source-coverage"', 1)[1].split("</section>", 1)[0]
     assert "Evidence Coverage by Source" in section
     assert "Evidence coverage is not complete." in section
-    assert 'badge-source-present' in section
-    assert 'badge-source-absent' in section
-    assert 'badge-source-empty' in section
+    assert "badge-source-present" in section
+    assert "badge-source-absent" in section
+    assert "badge-source-empty" in section
     assert "disabled by default" in section
     assert "registry" in section
 
