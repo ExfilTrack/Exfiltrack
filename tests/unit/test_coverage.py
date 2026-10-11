@@ -303,3 +303,75 @@ def test_coverage_csv_round_trips_all_rows(tmp_path: Path) -> None:
     written = write_coverage_csv(coverage, tmp_path)
     assert written.name == "coverage.csv"
     assert written.read_text(encoding="utf-8") == text
+
+
+# ---------------------------------------------------------------------------
+# Pipeline wiring: coverage in the manifest, all three report formats, result
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_pipeline_records_coverage_in_all_outputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A DriverFrameworks-only evidence set: coverage names the rest absent."""
+    import json
+
+    from exfiltrack.config import CaseConfig
+    from exfiltrack.pipeline import run_pipeline
+    from tests.support.synthetic_evtx import (
+        SyntheticEvtxReader,
+        device_lifecycle_xml,
+        placeholder_evtx_file,
+    )
+
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    dfu_log = evidence_dir / "Microsoft-Windows-DriverFrameworks-UserMode%4Operational.evtx"
+    placeholder_evtx_file(dfu_log)
+    record = device_lifecycle_xml(
+        event_id="2003",
+        device_instance_id=r"USB\VID_1234&PID_5678\SERIAL001",
+        when=utc(2026, 3, 1, 9, 0, 0),
+        record_id=1,
+    )
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx",
+        SyntheticEvtxReader({dfu_log.resolve().as_posix(): [record]}),
+    )
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-COV",
+        examiner="J. Doe",
+    )
+
+    result = run_pipeline(config)
+
+    assert result.coverage is not None
+    by_source = _by_source(result.coverage)
+    assert by_source[EVTX_DRIVERFRAMEWORKS].status is SourceStatus.PRESENT
+    assert by_source[EVTX_DRIVERFRAMEWORKS].event_count == 1
+    assert by_source[EVTX_SECURITY].status is SourceStatus.ABSENT
+    assert by_source[LNK].status is SourceStatus.ABSENT
+
+    manifest_json = json.loads(result.report_paths["manifest"].read_text(encoding="utf-8"))
+    assert manifest_json["coverage"]["complete"] is False
+    assert any(
+        row["source"] == LNK and row["status"] == "absent"
+        for row in manifest_json["coverage"]["sources"]
+    )
+
+    # JSON report carries coverage via the embedded manifest (issue #34 DoD).
+    findings_json = json.loads(result.report_paths["json"].read_text(encoding="utf-8"))
+    assert findings_json["manifest"]["coverage"] == manifest_json["coverage"]
+
+    # CSV format.
+    coverage_csv = result.report_paths["coverage_csv"]
+    assert coverage_csv.name == "coverage.csv"
+    assert "evtx/Security" in coverage_csv.read_text(encoding="utf-8")
+
+    # HTML format.
+    html = result.report_paths["html"].read_text(encoding="utf-8")
+    assert 'id="source-coverage"' in html
+    assert "Evidence Coverage by Source" in html
