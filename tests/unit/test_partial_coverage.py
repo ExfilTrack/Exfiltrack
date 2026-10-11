@@ -36,9 +36,7 @@ def _registry_bounded_events():
         make_insert_event(base, device, details=dict(MOST_RECENT_ONLY)),
         make_file_event(base + timedelta(seconds=5), r"E:\Confidential\db_dump.sql"),
         make_file_event(base + timedelta(seconds=12), r"E:\Confidential\keys.pem"),
-        make_remove_event(
-            base + timedelta(minutes=10), device, details=dict(MOST_RECENT_ONLY)
-        ),
+        make_remove_event(base + timedelta(minutes=10), device, details=dict(MOST_RECENT_ONLY)),
     ]
 
 
@@ -120,7 +118,10 @@ LIMITATIONS_TEXT = "Temporal correlation alone does not prove that a file was co
 def _clean_events() -> list:
     device = make_device()
     base = utc(2026, 3, 1, 9, 0, 0)
-    return [make_insert_event(base, device), make_remove_event(base + timedelta(minutes=10), device)]
+    return [
+        make_insert_event(base, device),
+        make_remove_event(base + timedelta(minutes=10), device),
+    ]
 
 
 def _manifest():  # type: ignore[no-untyped-def]
