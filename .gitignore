@@ -108,5 +108,10 @@ local_config.*
 !examples/synthetic/
 !examples/synthetic/**
 
+/public_datasets/*
+!/public_datasets/public-datasets-links.txt
+!/public_datasets/test_evidence_suite/
+!/public_datasets/test_evidence_suite/**
+
 
 Cyber Project Proposal.pdf
