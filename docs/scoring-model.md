@@ -69,4 +69,16 @@ Reproducibility and integrity, also part of #13's Definition of Done, are covere
 
 ## Known Weaknesses
 
-_To document: cases where the model over-scores or under-scores, and the reasoning behind accepting each._
+### Registry-property session boundaries (decision, #35)
+
+When the DriverFrameworks channel was disabled, session boundaries can only come from registry properties `0066`/`0067`, which record **only the most recent connection** and are independently overwritten on each one. A session bounded that way is materially weaker than an event-log-bounded one: file activity attached to its window may belong to an earlier, overwritten connection.
+
+**Decision (recorded on issue #35 before implementation):** the confidence ceiling is **not** capped for such sessions. Rationale:
+
+1. A `Confirmed` verdict rests on a cryptographic hash match to the destination device, which is justified independently of how the session was bounded; capping it would hide the strongest signal the tool can produce.
+2. Evidence *availability* and evidentiary *strength* are different axes. Folding availability into the confidence level would conflate them and make scores harder to explain line by line — the property this model is built on.
+3. `High` already requires both boundaries to be *observed* rather than idle-gap-*inferred*, which guards the strongest score-based level from the weakest (fully inferred) case.
+
+**What ships instead:** every session records which evidence class backs each boundary (`event_log` / `registry_properties` / `inferred`), and a `partial_coverage` marker with per-boundary reasons is surfaced alongside the confidence level in all three report formats (`report.html`, `findings.json`, `findings.csv`).
+
+**Accepted cost:** a session bounded only by registry properties counts as observed (the registry read is real) and can still reach `High`; the marker next to the level is the disclosure mechanism. Accepted because the alternative — silently weakening verdicts that are independently justified — trades a visible caveat for an invisible one.

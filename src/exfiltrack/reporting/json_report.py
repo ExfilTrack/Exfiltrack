@@ -65,6 +65,12 @@ def _finding_to_dict(finding: Finding) -> dict[str, Any]:
             "timestamp_utc": session.end.timestamp_utc.isoformat(),
             "observed": session.end.observed,
         },
+        # Issue #35: which evidence class backs each boundary, and why the
+        # session counts as scored under partial coverage (empty when it does
+        # not). The confidence level is unchanged by design; these keys carry
+        # the disclosure.
+        "boundary_sources": list(session.boundary_sources),
+        "partial_coverage": list(session.partial_coverage_reasons),
         "file_events": [_event_to_dict(e) for e in session.file_events],
         "score": {
             "total": finding.scored_session.total_score,

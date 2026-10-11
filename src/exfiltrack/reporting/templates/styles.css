@@ -152,6 +152,19 @@ code, .mono {
   border-radius: 6px;
 }
 
+/* Per-finding partial-coverage marker (issue #35). */
+.boundary-warning {
+  border-left: 3px solid var(--inferred);
+  background: var(--inferred-bg);
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.boundary-warning ul {
+  margin: 0.35rem 0 0;
+}
+
 .acquisition-disclaimer { font-size: 0.9rem; }
 .acquisition-records, .parser-errors { table-layout: fixed; }
 .acquisition-records td, .acquisition-records .mono,
