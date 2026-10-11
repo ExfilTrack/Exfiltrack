@@ -156,6 +156,11 @@ class CaseManifest:
         Artifacts whose parser failed in a run that continues past parser
         failures (auto mode). Always empty for strict manual runs, which
         abort on the first failure.
+    coverage:
+        Per-source evidence coverage (issue #34) as built by
+        :func:`exfiltrack.reporting.coverage.build_coverage`; ``None`` only
+        for manifests constructed outside the pipeline (e.g. report unit
+        tests).
     """
 
     case_id: str
@@ -171,6 +176,7 @@ class CaseManifest:
     integrity_verdict: IntegrityVerdict = IntegrityVerdict.PENDING
     acquisition: dict[str, Any] | None = None
     parser_errors: list[dict[str, str]] = field(default_factory=list)
+    coverage: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self._require_utc("start_time", self.start_time)
@@ -203,8 +209,9 @@ class CaseManifest:
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of the whole manifest.
 
-        ``acquisition`` and ``parser_errors`` are emitted only when present, so
-        manual runs keep their existing manifest layout byte for byte.
+        ``acquisition``, ``parser_errors``, and ``coverage`` are emitted only
+        when present, so manifests built outside the pipeline keep their
+        existing layout byte for byte.
         """
         payload: dict[str, object] = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -224,6 +231,8 @@ class CaseManifest:
             payload["acquisition"] = self.acquisition
         if self.parser_errors:
             payload["parser_errors"] = [dict(error) for error in self.parser_errors]
+        if self.coverage is not None:
+            payload["coverage"] = self.coverage
         return payload
 
 

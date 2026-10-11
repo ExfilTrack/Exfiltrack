@@ -45,7 +45,8 @@ from exfiltrack.evidence.manifest import (
 )
 from exfiltrack.normalization.event_model import NormalizedEvent, sort_events
 from exfiltrack.parsers import evtx_parser, jumplist_parser, lnk_parser, registry_parser
-from exfiltrack.reporting.csv_report import write_csv_reports
+from exfiltrack.reporting.coverage import EvidenceCoverage, build_coverage
+from exfiltrack.reporting.csv_report import write_coverage_csv, write_csv_reports
 from exfiltrack.reporting.html_report import write_html_report
 from exfiltrack.reporting.json_report import write_json_report
 from exfiltrack.reporting.model import Finding, assemble_findings
@@ -160,8 +161,11 @@ class PipelineResult:
         findings: Scored, confidence-evaluated findings, one per session.
         report_paths: Absolute paths written, keyed by
             ``"manifest"``, ``"json"``, ``"findings_csv"``, ``"timeline_csv"``,
-            and ``"html"``. Empty when the run was invoked with
-            ``write_reports=False``.
+            ``"coverage_csv"``, and ``"html"``. Empty when the run was invoked
+            with ``write_reports=False``.
+        coverage: Per-source evidence coverage (issue #34): which expected
+            sources were supplied, parsed, and yielded events. Also embedded
+            in ``manifest``.
     """
 
     manifest: CaseManifest
@@ -170,6 +174,7 @@ class PipelineResult:
     sessions: tuple[UsbSession, ...]
     findings: tuple[Finding, ...]
     report_paths: dict[str, Path] = field(default_factory=dict)
+    coverage: EvidenceCoverage | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +338,13 @@ def run_pipeline(
 
     manifest.parser_records = [parser_records[key] for key in sorted(parser_records)]
 
+    # Record which expected sources were present, absent, or empty, so a clean
+    # report from an unconfigured endpoint can no longer read as an
+    # exoneration (issue #34). Depends only on intake records, parsed events,
+    # and parser errors, so identical evidence yields identical coverage.
+    coverage = build_coverage(artifacts, events, parser_errors=manifest.parser_errors)
+    manifest.coverage = coverage.to_dict()
+
     print(f"Normalizing and sorting {len(events)} events into timeline...")
     timeline = sort_events(events)
 
@@ -368,6 +380,7 @@ def run_pipeline(
         findings_csv, timeline_csv = write_csv_reports(list(findings), output_dir)
         report_paths["findings_csv"] = findings_csv
         report_paths["timeline_csv"] = timeline_csv
+        report_paths["coverage_csv"] = write_coverage_csv(coverage, output_dir)
         report_paths["html"] = write_html_report(
             list(findings),
             manifest,
@@ -384,4 +397,5 @@ def run_pipeline(
         sessions=tuple(sessions),
         findings=tuple(findings),
         report_paths=report_paths,
+        coverage=coverage,
     )

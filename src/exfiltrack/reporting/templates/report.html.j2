@@ -107,6 +107,44 @@
         {% endif %}
       </section>
     {% endif %}
+    {% if manifest.coverage is defined and manifest.coverage is not none %}
+      {# Per-source coverage at intake/parse time (issue #34). Present for every
+         analyzed run; complements the acquisition block above (collection time)
+         on live-acquisition cases. #}
+      <section id="source-coverage">
+        <h2>Evidence Coverage by Source</h2>
+        {% if not manifest.coverage.complete %}
+          <div class="coverage-warning" role="note">
+            <strong>Evidence coverage is not complete.</strong> A source marked absent or
+            empty below could not speak to what happened: absent evidence is not evidence
+            of absent activity.
+          </div>
+        {% endif %}
+        <table>
+          <thead>
+            <tr><th>Source</th><th>Status</th><th>Supplied</th><th>Parsed</th><th>Events</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            {% for row in manifest.coverage.sources %}
+            <tr>
+              <td class="mono">{{ row.source }}</td>
+              <td><span class="badge badge-source-{{ row.status }}">{{ row.status | title }}</span></td>
+              <td>{{ row.supplied }}</td>
+              <td>{{ row.parsed }}</td>
+              <td>{{ row.event_count }}</td>
+              <td>{{ row.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p>
+          Coverage describes which expected sources were supplied to the analyzer and what
+          they yielded at parse time. Distinguish a source that recorded nothing (empty)
+          from one that was never supplied (absent): only the former is evidence the
+          activity did not occur, and even then only within that source's limits.
+        </p>
+      </section>
+    {% endif %}
     {% if manifest.parser_errors is defined and manifest.parser_errors %}
       <section id="analysis-coverage">
         <h2>Analysis Coverage</h2>

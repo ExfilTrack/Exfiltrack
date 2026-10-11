@@ -131,9 +131,20 @@ code, .mono {
 .badge-verdict-pending { color: var(--inferred); background: var(--inferred-bg); }
 .badge-verdict-failed { color: var(--confirmed); background: var(--confirmed-bg); }
 
-.badge-coverage-complete, .badge-acquisition-collected {
+.badge-coverage-complete, .badge-acquisition-collected,
+.badge-source-present {
   color: var(--observed);
   background: var(--observed-bg);
+}
+
+.badge-source-empty {
+  color: var(--inferred);
+  background: var(--inferred-bg);
+}
+
+.badge-source-absent {
+  color: var(--confirmed);
+  background: var(--confirmed-bg);
 }
 
 .badge-coverage-partial, .badge-acquisition-missing,
