@@ -115,7 +115,19 @@ Each finding also carries a confidence level: **Low** → **Medium** → **High*
 
 ExfilTrack is an offline, post-incident artifact-analysis tool. It does not monitor systems in real time, does not intercept network or clipboard traffic, and cannot decrypt password-protected archives. Its conclusions are risk scores and confidence levels, not definitive proof. Read [docs/limitations.md](docs/limitations.md) before relying on any output.
 
-## Installation
+## Quick Start & Releases
+
+### Standalone Windows Executable (Recommended for Triage)
+
+For forensic workstations, triage VMs, or machines without a Python environment:
+
+1. Download the latest **[ExfilTrack.exe](https://github.com/ExfilTrack/Exfiltrack/releases/download/v1.0/ExfilTrack.exe)** from [GitHub Releases (v1.0)](https://github.com/ExfilTrack/Exfiltrack/releases/tag/v1.0).
+2. Double-click `ExfilTrack.exe`. The application automatically requests UAC Administrator privileges to allow live artifact collection (`--auto` / Live mode).
+3. No Python runtime, Git, or virtual environment setup is required.
+
+---
+
+## Installation (From Source)
 
 Requires Python 3.10 or newer.
 
@@ -130,6 +142,14 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -e ".[dev]"
+```
+
+To build your own standalone Windows executable from source:
+
+```bash
+pip install pyinstaller
+pyinstaller ExfilTrack.spec
+# The output executable is created in dist/ExfilTrack.exe
 ```
 
 Verify the toolchain:
