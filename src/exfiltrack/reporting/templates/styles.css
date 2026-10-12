@@ -185,13 +185,61 @@ code, .mono {
 .acquisition-metadata dt { font-weight: 600; }
 .acquisition-metadata dd { margin: 0 0 0.35rem; }
 
-.session {
+.report-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  padding: 0.75rem 2rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.9rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.report-nav a {
+  color: var(--medium);
+  text-decoration: none;
+}
+
+.report-nav a:hover { text-decoration: underline; }
+
+.summary-line { font-size: 0.95rem; }
+
+.summary-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.summary-table td:first-child { width: 2.5rem; }
+
+.device-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.summary-alert {
+  padding: 0.6rem 1rem;
+  margin: 0.75rem 0 0 0;
+  border: 2px solid var(--inferred);
+  background: var(--inferred-bg);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+/* Sessions are <details> elements: collapsed to one scannable summary line
+   by default, expanded in place for the full evidence. */
+details.session {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 1.25rem;
 }
 
-.session:last-child { margin-bottom: 0; }
+details.session:last-child { margin-bottom: 0; }
 
 .session-header {
   display: flex;
@@ -203,13 +251,59 @@ code, .mono {
   border-bottom: 1px solid var(--border);
 }
 
+summary.session-header {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.session-header::-webkit-details-marker { display: none; }
+
+summary.session-header::before {
+  content: "\25B8";
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+details.session[open] > summary.session-header::before { content: "\25BE"; }
+
+details.session:not([open]) > summary.session-header { border-bottom: none; }
+
 .session-header .device-name {
   font-weight: 600;
   margin-right: auto;
 }
 
+.session-header .session-index {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.session-header .session-events,
+.session-header .session-window {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .session-body {
   padding: 1rem;
+}
+
+details.firings, details.more-events, details.records, details.more-artifacts {
+  margin: 0.35rem 0;
+}
+
+details.firings > summary,
+details.more-events > summary,
+details.records > summary,
+details.more-artifacts > summary {
+  cursor: pointer;
+  color: var(--medium);
+  font-size: 0.85rem;
+}
+
+.event-count {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .boundary-row {
@@ -262,4 +356,10 @@ footer.report-footer {
 @media print {
   body { background: var(--bg); padding: 0; }
   .report { border: none; border-radius: 0; max-width: none; }
+  .report-nav { display: none; }
+  /* Printed output must lose nothing: force collapsed regions visible.
+     First rule covers UA stylesheets that hide closed <details> content;
+     second covers engines implementing it via content-visibility. */
+  details:not([open]) > :not(summary) { display: block !important; }
+  details:not([open]) { content-visibility: visible !important; }
 }

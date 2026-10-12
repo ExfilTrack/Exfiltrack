@@ -1,6 +1,28 @@
 {# ExfilTrack HTML report (issue #11). Self-contained: no external CSS,
    fonts, or scripts. All evidence-derived values are autoescaped by the
-   Environment configured in html_report.py. #}
+   Environment configured in html_report.py.
+
+   Layout: the reader gets the answer first (Executive Summary), then the
+   evidence behind it. Findings are ordered highest-risk first and collapsed
+   by default; every firing, event, and cited artifact is still rendered
+   inside the collapsed regions (traceability is never traded for brevity). #}
+{% set acquisition = manifest.acquisition if (manifest.acquisition is defined and manifest.acquisition is not none) else none %}
+{% macro file_event_table(events) %}
+            <table class="file-events">
+              <thead>
+                <tr><th>Timestamp (UTC)</th><th>File path</th><th>Source artifact</th></tr>
+              </thead>
+              <tbody>
+                {% for event in events %}
+                <tr>
+                  <td class="mono">{{ event.timestamp_utc | fmt_ts }}</td>
+                  <td class="mono">{{ event.file_path }}</td>
+                  <td class="mono">{{ event.source_artifact }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+{% endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,8 +48,85 @@
       acting on any finding below.
     </div>
 
-    {% if manifest.acquisition is defined and manifest.acquisition is not none %}
-      {% set acquisition = manifest.acquisition %}
+    <nav class="report-nav" aria-label="Report sections">
+      <a href="#summary">Summary</a>
+      {% if acquisition %}<a href="#evidence-coverage">Evidence Coverage</a>{% endif %}
+      {% if manifest.coverage is defined and manifest.coverage is not none %}<a href="#source-coverage">Source Coverage</a>{% endif %}
+      {% if manifest.parser_errors is defined and manifest.parser_errors %}<a href="#analysis-coverage">Analysis Coverage</a>{% endif %}
+      <a href="#findings">Findings</a>
+      <a href="#chain-of-custody">Chain of Custody</a>
+      <a href="#limitations">Limitations</a>
+    </nav>
+
+    <section id="summary">
+      <h2>Executive Summary</h2>
+      {% if summary.session_count == 0 %}
+        <p class="no-findings">No USB sessions were reconstructed from the supplied evidence.</p>
+      {% else %}
+        <p class="summary-line">
+          {{ summary.session_count }} USB session(s) reconstructed across
+          {{ summary.device_count }} device(s), with
+          {{ summary.total_file_events }} file event(s) inside session windows.
+          Highest confidence:
+          <span class="badge badge-confidence-{{ summary.highest_confidence_class }}">{{ summary.highest_confidence }}</span>.
+          Highest session score: <strong>{{ summary.max_score }}</strong>.
+          Integrity verdict:
+          <span class="badge badge-verdict-{{ manifest.integrity_verdict.value }}">{{ manifest.integrity_verdict.value }}</span>.
+        </p>
+        <table class="summary-table">
+          <thead>
+            <tr><th>#</th><th>Device</th><th>Window (UTC)</th><th>Confidence</th><th>Score</th><th>File events</th></tr>
+          </thead>
+          <tbody>
+            {% for view in finding_views %}
+              {% set session = view.finding.session %}
+              <tr>
+                <td><a href="#{{ view.anchor }}">{{ loop.index }}</a></td>
+                <td>
+                  {{ session.device.display_name }}
+                  {% if session.device.serial_number and session.device.serial_number not in session.device.display_name %}
+                    <div class="device-sub mono">S/N {{ session.device.serial_number }}</div>
+                  {% endif %}
+                </td>
+                <td class="mono">
+                  {{ session.start.timestamp_utc | fmt_ts }} &ndash; {{ session.end.timestamp_utc | fmt_ts }}
+                  {% if not session.is_fully_observed %}
+                    <span class="badge badge-inferred">inferred boundary</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge badge-confidence-{{ view.finding.confidence.level.name | lower }}">{{ view.finding.confidence.level }}</span>
+                </td>
+                <td class="score-total">{{ view.finding.scored_session.total_score }}</td>
+                <td>{{ session.file_events | length }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="summary-note">Sessions are listed highest-risk first; select a row number to jump to its full evidence.</p>
+      {% endif %}
+      {% if manifest.parser_errors is defined and manifest.parser_errors %}
+        <div class="summary-alert" role="note">
+          Analysis is partial: {{ manifest.parser_errors | length }} artifact(s) could not be
+          parsed. Review <a href="#analysis-coverage">Analysis Coverage</a> before interpreting findings.
+        </div>
+      {% endif %}
+      {% if acquisition and acquisition.coverage == 'partial' %}
+        <div class="summary-alert" role="note">
+          Evidence collection coverage is partial. Review
+          <a href="#evidence-coverage">Evidence Coverage</a> before interpreting findings.
+        </div>
+      {% endif %}
+      {% if manifest.coverage is defined and manifest.coverage is not none and not manifest.coverage.complete %}
+        <div class="summary-alert" role="note">
+          Some expected evidence sources were absent or empty. Review
+          <a href="#source-coverage">Evidence Coverage by Source</a>: absent evidence is not
+          evidence of absent activity.
+        </div>
+      {% endif %}
+    </section>
+
+    {% if acquisition %}
       <section id="evidence-coverage">
         <h2>Evidence Coverage</h2>
         {% if acquisition.coverage == 'partial' %}
@@ -63,45 +162,48 @@
           </ul>
         {% endif %}
         {% if acquisition.records %}
-          <table class="acquisition-records">
-            <thead>
-              <tr><th>Category</th><th>Source and snapshot</th><th>Method</th><th>Status</th><th>Collection time</th><th>Diagnostics</th></tr>
-            </thead>
-            <tbody>
-              {% for record in acquisition.records %}
-                <tr>
-                  <td>{{ record.category }}</td>
-                  <td>
-                    <div class="mono">{{ record.source }}</div>
-                    {% if record.status == 'collected' %}
-                      <div><strong>Destination (relative to evidence root)</strong></div>
-                      <div class="mono">{{ record.destination }}</div>
-                      <div><strong>SHA-256</strong></div>
-                      <div class="mono">{{ record.sha256 }}</div>
-                    {% endif %}
-                  </td>
-                  <td>{{ record.method }}</td>
-                  <td><span class="badge badge-acquisition-{{ record.status }}">{{ record.status }}</span></td>
-                  <td>
-                    <div><strong>Started</strong></div>
-                    <div class="mono">{{ record.started_at }}</div>
-                    <div><strong>Finished</strong></div>
-                    <div class="mono">{% if record.finished_at %}{{ record.finished_at }}{% else %}in progress{% endif %}</div>
-                  </td>
-                  <td>
-                    {% if record.message %}<div class="acquisition-message">{{ record.message }}</div>{% endif %}
-                    {% if record.metadata %}
-                      <dl class="acquisition-metadata">
-                        {% for key, value in record.metadata.items() %}
-                          <dt>{{ key }}</dt><dd>{{ value }}</dd>
-                        {% endfor %}
-                      </dl>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <details class="records">
+            <summary>Collection records ({{ acquisition.records | length }})</summary>
+            <table class="acquisition-records">
+              <thead>
+                <tr><th>Category</th><th>Source and snapshot</th><th>Method</th><th>Status</th><th>Collection time</th><th>Diagnostics</th></tr>
+              </thead>
+              <tbody>
+                {% for record in acquisition.records %}
+                  <tr>
+                    <td>{{ record.category }}</td>
+                    <td>
+                      <div class="mono">{{ record.source }}</div>
+                      {% if record.status == 'collected' %}
+                        <div><strong>Destination (relative to evidence root)</strong></div>
+                        <div class="mono">{{ record.destination }}</div>
+                        <div><strong>SHA-256</strong></div>
+                        <div class="mono">{{ record.sha256 }}</div>
+                      {% endif %}
+                    </td>
+                    <td>{{ record.method }}</td>
+                    <td><span class="badge badge-acquisition-{{ record.status }}">{{ record.status }}</span></td>
+                    <td>
+                      <div><strong>Started</strong></div>
+                      <div class="mono">{{ record.started_at }}</div>
+                      <div><strong>Finished</strong></div>
+                      <div class="mono">{% if record.finished_at %}{{ record.finished_at }}{% else %}in progress{% endif %}</div>
+                    </td>
+                    <td>
+                      {% if record.message %}<div class="acquisition-message">{{ record.message }}</div>{% endif %}
+                      {% if record.metadata %}
+                        <dl class="acquisition-metadata">
+                          {% for key, value in record.metadata.items() %}
+                            <dt>{{ key }}</dt><dd>{{ value }}</dd>
+                          {% endfor %}
+                        </dl>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
         {% else %}
           <p class="no-activity">No acquisition records were supplied.</p>
         {% endif %}
@@ -173,22 +275,32 @@
       </section>
     {% endif %}
     <section id="findings">
-      <h2>Findings ({{ findings | length }})</h2>
-      {% if not findings %}
+      <h2>Findings ({{ summary.session_count }})</h2>
+      {% if not finding_views %}
         <p class="no-findings">No USB sessions were reconstructed from the supplied evidence.</p>
       {% else %}
-        {% for finding in findings %}
+        {% for view in finding_views %}
+          {% set finding = view.finding %}
           {% set session = finding.session %}
           {% set scored = finding.scored_session %}
-          <div class="session">
-            <div class="session-header">
+          <details class="session" id="{{ view.anchor }}"{% if loop.first %} open{% endif %}>
+            <summary class="session-header">
+              <span class="session-index">#{{ loop.index }}</span>
               <span class="device-name">{{ session.device.display_name }}</span>
               <span class="badge badge-confidence-{{ finding.confidence.level.name | lower }}">
                 {{ finding.confidence.level }}
               </span>
               <span class="score-total">Score {{ scored.total_score }}</span>
-            </div>
+              <span class="session-events">{{ session.file_events | length }} file event(s)</span>
+              <span class="session-window mono">{{ session.start.timestamp_utc | fmt_ts }} &ndash; {{ session.end.timestamp_utc | fmt_ts }}</span>
+            </summary>
             <div class="session-body">
+              {% if session.device.device_id != session.device.display_name %}
+                <div class="boundary-row">
+                  <span class="label">Device ID</span>
+                  <span class="mono">{{ session.device.device_id }}</span>
+                </div>
+              {% endif %}
               <div class="boundary-row">
                 <span class="label">Start</span>
                 <span class="mono">{{ session.start.timestamp_utc | fmt_ts }}</span>
@@ -223,22 +335,44 @@
               {% endif %}
               <p><em>{{ finding.confidence.reason }}</em></p>
 
-              {% if scored.contributions %}
+              {% if view.rollups %}
                 <table>
                   <thead>
-                    <tr><th>Rule</th><th>Points</th><th>Source artifact(s)</th><th>Explanation</th></tr>
+                    <tr><th>Rule</th><th>Firings</th><th>Points</th><th>Source artifact(s)</th><th>Detail</th></tr>
                   </thead>
                   <tbody>
-                    {% for c in scored.contributions %}
+                    {% for rollup in view.rollups %}
                     <tr>
-                      <td>{{ c.rule | humanize }}</td>
-                      <td>{{ c.points }}</td>
+                      <td>{{ rollup.rule | humanize }}</td>
+                      <td>{{ rollup.firings | length }}</td>
+                      <td>{{ rollup.total_points }}</td>
                       <td>
-                        {% for artifact in c.source_artifacts %}
+                        {% for artifact in rollup.artifacts[:5] %}
                           <div class="mono">{{ artifact }}</div>
                         {% endfor %}
+                        {% if rollup.artifacts | length > 5 %}
+                          <details class="more-artifacts">
+                            <summary>and {{ rollup.artifacts | length - 5 }} more</summary>
+                            {% for artifact in rollup.artifacts[5:] %}
+                              <div class="mono">{{ artifact }}</div>
+                            {% endfor %}
+                          </details>
+                        {% endif %}
                       </td>
-                      <td>{{ c.explanation }}</td>
+                      <td>
+                        {% if rollup.firings | length == 1 %}
+                          {{ rollup.firings[0].explanation }}
+                        {% else %}
+                          <details class="firings">
+                            <summary>Show {{ rollup.firings | length }} firings</summary>
+                            <ul>
+                              {% for firing in rollup.firings %}
+                                <li>{{ firing.explanation }}</li>
+                              {% endfor %}
+                            </ul>
+                          </details>
+                        {% endif %}
+                      </td>
                     </tr>
                     {% endfor %}
                   </tbody>
@@ -248,25 +382,25 @@
               {% endif %}
 
               {% if session.file_events %}
-                <table>
-                  <thead>
-                    <tr><th>Timestamp (UTC)</th><th>File path</th><th>Source artifact</th></tr>
-                  </thead>
-                  <tbody>
-                    {% for event in session.file_events %}
-                    <tr>
-                      <td class="mono">{{ event.timestamp_utc | fmt_ts }}</td>
-                      <td class="mono">{{ event.file_path }}</td>
-                      <td class="mono">{{ event.source_artifact }}</td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
+                {% if session.file_events | length > visible_file_events %}
+                  <p class="event-count">
+                    {{ session.file_events | length }} file events fell within this session's
+                    window; the first {{ visible_file_events }} are shown and the remainder
+                    are collapsed below.
+                  </p>
+                  {{ file_event_table(session.file_events[:visible_file_events]) }}
+                  <details class="more-events">
+                    <summary>Show the remaining {{ session.file_events | length - visible_file_events }} events</summary>
+                    {{ file_event_table(session.file_events[visible_file_events:]) }}
+                  </details>
+                {% else %}
+                  {{ file_event_table(session.file_events) }}
+                {% endif %}
               {% else %}
                 <p class="no-activity">No file activity fell within this session's window.</p>
               {% endif %}
             </div>
-          </div>
+          </details>
         {% endfor %}
       {% endif %}
     </section>
