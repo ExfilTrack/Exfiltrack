@@ -15,7 +15,14 @@ from markupsafe import escape
 from exfiltrack.config import ScoringWeights
 from exfiltrack.correlation.sessions import reconstruct_sessions
 from exfiltrack.evidence.manifest import CaseManifest, IntegrityVerdict, ParserRecord
-from exfiltrack.reporting.html_report import ReportError, render_html_report, write_html_report
+from exfiltrack.reporting.html_report import (
+    ReportError,
+    _rollup_contributions,
+    build_finding_views,
+    render_html_report,
+    summarize_views,
+    write_html_report,
+)
 from exfiltrack.reporting.model import assemble_findings
 from tests.unit.factories import (
     make_device,
@@ -546,3 +553,229 @@ def test_missing_or_empty_acquisition_limitations_do_not_change_report(limitatio
     assert html == render_html_report(
         [], _manifest(acquisition=_acquisition()), LIMITATIONS_TEXT, generated_at=when
     )
+
+
+# ---------------------------------------------------------------------------
+# Restructured layout: executive summary, risk ordering, collapsed evidence
+# ---------------------------------------------------------------------------
+
+
+def _two_sessions_risk_order():
+    """Two observed sessions: the chronologically earlier one is risk-free.
+
+    The later session scores 60 (30s activity + sensitive extension +
+    protected directory), reaching High; the earlier one scores 0 (None).
+    Chronological order and risk order therefore disagree, which is what the
+    restructured layout must resolve in the reader's favor.
+    """
+    device = make_device()
+    events = [
+        make_insert_event(utc(2026, 1, 1, 8, 0, 0), device),
+        make_remove_event(utc(2026, 1, 1, 8, 30, 0), device),
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device),
+        make_remove_event(utc(2026, 1, 1, 10, 0, 0), device),
+        make_file_event(utc(2026, 1, 1, 9, 0, 10), r"C:\Projects\confidential\secrets.env"),
+    ]
+    sessions = reconstruct_sessions(events)
+    return assemble_findings(sessions, weights=WEIGHTS)
+
+
+def _findings_section(html: str) -> str:
+    return html.split('id="findings"', 1)[1]
+
+
+def _session_blocks(html: str) -> list[str]:
+    return _findings_section(html).split('<details class="session"')[1:]
+
+
+@pytest.mark.unit
+def test_executive_summary_reports_case_level_figures_before_findings() -> None:
+    html = render_html_report(_two_sessions_risk_order(), _manifest(), LIMITATIONS_TEXT)
+    summary = html.split('id="summary"', 1)[1].split("</section>", 1)[0]
+
+    assert "2 USB session(s)" in summary
+    assert "1 device(s)" in summary
+    assert "1 file event(s)" in summary
+    assert "Highest confidence:" in summary
+    assert 'class="badge badge-confidence-high">High</span>' in summary
+    assert "Highest session score: <strong>60</strong>" in summary
+    assert html.index('id="summary"') < html.index('id="findings"')
+
+
+@pytest.mark.unit
+def test_summary_table_lists_sessions_highest_risk_first_with_anchor_links() -> None:
+    html = render_html_report(_two_sessions_risk_order(), _manifest(), LIMITATIONS_TEXT)
+    table = html.split('class="summary-table"', 1)[1].split("</table>", 1)[0]
+
+    assert table.index('href="#session-1"') < table.index('href="#session-2"')
+    # The riskiest session is the later (High) one, so session-1 carries its score.
+    first_row = table.split("</thead>", 1)[1].split("</tr>", 1)[0]
+    assert ">60</td>" in first_row
+    assert "badge-confidence-high" in first_row
+
+
+@pytest.mark.unit
+def test_findings_are_ordered_highest_risk_first_with_stable_anchors() -> None:
+    findings = _two_sessions_risk_order()
+    # assemble_findings returns chronological order; the view must re-order.
+    assert findings[0].scored_session.total_score == 0
+
+    views = build_finding_views(findings)
+
+    assert [view.anchor for view in views] == ["session-1", "session-2"]
+    assert views[0].finding.scored_session.total_score == 60
+    assert views[1].finding.scored_session.total_score == 0
+
+    html = render_html_report(findings, _manifest(), LIMITATIONS_TEXT)
+    blocks = _session_blocks(html)
+    assert len(blocks) == 2
+    assert "secrets.env" in blocks[0]
+    assert "secrets.env" not in blocks[1]
+
+
+@pytest.mark.unit
+def test_only_the_highest_risk_session_is_expanded_by_default() -> None:
+    html = render_html_report(_two_sessions_risk_order(), _manifest(), LIMITATIONS_TEXT)
+
+    assert '<details class="session" id="session-1" open>' in html
+    assert '<details class="session" id="session-2">' in html
+
+
+@pytest.mark.unit
+def test_zero_findings_summary_and_no_sessions_render() -> None:
+    html = render_html_report([], _manifest(), LIMITATIONS_TEXT)
+
+    assert 'id="summary"' in html
+    assert "<details" not in _findings_section(html)
+    assert "No USB sessions were reconstructed" in html
+
+
+@pytest.mark.unit
+def test_repeated_rule_firings_are_aggregated_and_fully_retained() -> None:
+    device = make_device()
+    events = [
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device),
+        make_remove_event(utc(2026, 1, 1, 10, 0, 0), device),
+        make_file_event(utc(2026, 1, 1, 9, 0, 10), r"C:\Projects\confidential\a.env"),
+        make_file_event(utc(2026, 1, 1, 9, 0, 20), r"C:\Projects\confidential\b.env"),
+    ]
+    findings = assemble_findings(reconstruct_sessions(events), weights=WEIGHTS)
+    contributions = findings[0].scored_session.contributions
+
+    rollups = {rollup.rule: rollup for rollup in _rollup_contributions(contributions)}
+
+    assert len(rollups["sensitive_extension"].firings) == 2
+    assert rollups["sensitive_extension"].total_points == 30
+    assert len(rollups["activity_within_30s"].firings) == 2
+    assert rollups["activity_within_30s"].total_points == 50
+    assert len(rollups["multiple_confidential_files"].firings) == 1
+    # The rollup is a view concern only: every firing survives in the data.
+    assert len(contributions) == 7
+
+    html = render_html_report(findings, _manifest(), LIMITATIONS_TEXT)
+
+    assert html.count("Show 2 firings") == 3
+    # Collapsed, but every firing's explanation and path is still present.
+    assert "a.env" in html and "b.env" in html
+    assert "within the 30-second window" in html
+
+
+@pytest.mark.unit
+def test_long_file_activity_tables_are_collapsed_but_complete() -> None:
+    device = make_device()
+    events = [
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device),
+        make_remove_event(utc(2026, 1, 1, 23, 59, 0), device),
+    ]
+    for minute in range(25):
+        events.append(
+            make_file_event(utc(2026, 1, 1, 12, minute, 0), rf"C:\data\file_{minute:02d}.txt")
+        )
+    findings = assemble_findings(reconstruct_sessions(events), weights=WEIGHTS)
+
+    html = render_html_report(findings, _manifest(), LIMITATIONS_TEXT)
+
+    assert "25 file events fell within this session's" in html
+    assert "Show the remaining 5 events" in html
+    # Collapsed rows are still rendered: nothing is truncated out of the report.
+    assert "file_00.txt" in html
+    assert "file_24.txt" in html
+
+
+@pytest.mark.unit
+def test_short_file_activity_tables_render_without_collapsing() -> None:
+    html = render_html_report(_findings_with_activity(), _manifest(), LIMITATIONS_TEXT)
+
+    assert "more-events" not in _findings_section(html)
+    assert "secrets.env" in html
+
+
+@pytest.mark.unit
+def test_nav_links_to_every_rendered_section() -> None:
+    manifest = _manifest(acquisition=_acquisition(), parser_errors=[_parser_error()])
+    html = render_html_report(_findings_with_activity(), manifest, LIMITATIONS_TEXT)
+    nav = html.split('class="report-nav"', 1)[1].split("</nav>", 1)[0]
+
+    for anchor in (
+        "#summary",
+        "#evidence-coverage",
+        "#analysis-coverage",
+        "#findings",
+        "#chain-of-custody",
+        "#limitations",
+    ):
+        assert f'href="{anchor}"' in nav
+
+
+@pytest.mark.unit
+def test_nav_omits_sections_that_are_not_rendered() -> None:
+    html = render_html_report([], _manifest(), LIMITATIONS_TEXT)
+    nav = html.split('class="report-nav"', 1)[1].split("</nav>", 1)[0]
+
+    assert "#evidence-coverage" not in nav
+    assert "#analysis-coverage" not in nav
+    assert "#findings" in nav
+
+
+@pytest.mark.unit
+def test_summary_surfaces_partial_coverage_and_parser_errors_up_front() -> None:
+    manifest = _manifest(
+        acquisition=_acquisition("partial", records=[_acquisition_record("missing")]),
+        parser_errors=[_parser_error()],
+    )
+
+    html = render_html_report(_findings_with_activity(), manifest, LIMITATIONS_TEXT)
+    summary = html.split('id="summary"', 1)[1].split("</section>", 1)[0]
+
+    assert "Analysis is partial" in summary
+    assert "Evidence collection coverage is partial" in summary
+    assert 'href="#analysis-coverage"' in summary
+    assert 'href="#evidence-coverage"' in summary
+
+
+@pytest.mark.unit
+def test_summarize_views_handles_zero_findings() -> None:
+    summary = summarize_views(build_finding_views([]))
+
+    assert summary.session_count == 0
+    assert summary.device_count == 0
+    assert summary.highest_confidence == ""
+
+
+@pytest.mark.unit
+def test_risk_order_ties_fall_back_to_start_time_for_determinism() -> None:
+    first = make_device(device_id="USB\\VID_0001&PID_0001\\SERIALAAA", serial_number="SERIALAAA")
+    second = make_device(device_id="USB\\VID_0002&PID_0002\\SERIALBBB", serial_number="SERIALBBB")
+    events = [
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), second),
+        make_remove_event(utc(2026, 1, 1, 9, 30, 0), second),
+        make_insert_event(utc(2026, 1, 1, 8, 0, 0), first),
+        make_remove_event(utc(2026, 1, 1, 8, 30, 0), first),
+    ]
+    findings = assemble_findings(reconstruct_sessions(events), weights=WEIGHTS)
+
+    views = build_finding_views(findings)
+
+    # Equal risk on both: the earlier session must come first, every time.
+    assert views[0].finding.session.start.timestamp_utc == utc(2026, 1, 1, 8, 0, 0)
+    assert views[1].finding.session.start.timestamp_utc == utc(2026, 1, 1, 9, 0, 0)
