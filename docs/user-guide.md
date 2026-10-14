@@ -126,7 +126,7 @@ For a case you want to control yourself (existing evidence exports, specific cas
    - **Offline evidence directory** — equivalent to `analyze --evidence`. Pick the evidence folder prepared earlier.
    - **Live acquisition** — equivalent to `analyze --auto`. Run from an elevated terminal and pick a **case directory that does not exist yet**; the evidence picker is disabled because artifacts are collected from the machine.
 3. Pick the **case output directory** (offline mode). It must not be inside the evidence directory; the GUI rejects that before a run starts.
-4. Click **Run Analysis**. The run executes in the background; progress and any parser warnings appear in the log pane.
+4. Click **Run Analysis**. The run executes in the background; the bar shows the current stage and the percentage of work done, and any parser warnings appear in the log pane.
 5. Review the findings table — device, session start, risk score, confidence, and whether session boundaries were observed or inferred. **Double-click a row** for the confidence reason and the per-rule score breakdown.
 6. Use **Open HTML Report** or **Open Output Folder** to reach the full report, and **Verify Case Integrity...** to re-check a case's recorded digests (equivalent to `exfiltrack verify`).
 

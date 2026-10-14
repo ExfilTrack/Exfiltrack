@@ -221,7 +221,7 @@ def test_run_analysis_live_collects_then_analyzes(
     captured: dict[str, Any] = {}
     sentinel = object()
 
-    def fake_collect(target: Path, *, case_id: str, examiner: str) -> Any:
+    def fake_collect(target: Path, *, case_id: str, examiner: str, progress: Any = None) -> Any:
         captured["target"] = target
         return acquisition
 
@@ -675,5 +675,142 @@ def test_app_one_click_cancel_starts_nothing(monkeypatch: pytest.MonkeyPatch) ->
         window.quick_button.invoke()
         assert window._worker is None
         assert window.summary_var.get() == "No analysis run yet."
+    finally:
+        root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Percentage progress (issue #65)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_analysis_offline_forwards_pipeline_stage_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _case_config(tmp_path)
+
+    def fake_run_pipeline(passed_config: CaseConfig, **kwargs: Any) -> Any:
+        kwargs["progress"]("Parsing 1/1", 0.4)
+        kwargs["progress"]("Done", 1.0)
+        return object()
+
+    monkeypatch.setattr(controller, "run_pipeline", fake_run_pipeline)
+    calls: list[tuple[str, float]] = []
+    controller.run_analysis(
+        mode=controller.OFFLINE_MODE,
+        evidence_dir=str(config.evidence_dir),
+        case_dir=str(config.case_output_dir),
+        case_id="CASE-001",
+        examiner="Examiner",
+        stage_progress=lambda stage, fraction: calls.append((stage, fraction)),
+    )
+    assert calls == [("Parsing 1/1", 0.4), ("Done", 1.0)]
+
+
+@pytest.mark.unit
+def test_run_analysis_live_scales_collection_and_pipeline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    case_dir = tmp_path / "CASE-NEW"
+    acquisition = SimpleNamespace(
+        evidence_dir=case_dir / "evidence",
+        reports_dir=case_dir / "reports",
+        manifest_path=case_dir / "acquisition_manifest.json",
+        manifest={"coverage": "complete", "records": []},
+    )
+
+    def fake_collect(target: Path, *, case_id: str, examiner: str, progress: Any = None) -> Any:
+        if progress is not None:
+            progress("Event log: System", 0.5)
+            progress("Registry hive: HKLM\\SOFTWARE", 1.0)
+        return acquisition
+
+    def fake_run_pipeline(passed_config: CaseConfig, **kwargs: Any) -> Any:
+        kwargs["progress"]("Writing reports", 0.9)
+        kwargs["progress"]("Done", 1.0)
+        return object()
+
+    monkeypatch.setattr(controller, "collect_live_evidence", fake_collect)
+    monkeypatch.setattr(controller, "run_pipeline", fake_run_pipeline)
+    calls: list[tuple[str, float]] = []
+    controller.run_analysis(
+        mode=controller.LIVE_MODE,
+        evidence_dir="",
+        case_dir=str(case_dir),
+        case_id="CASE-002",
+        examiner="Examiner",
+        stage_progress=lambda stage, fraction: calls.append((stage, fraction)),
+    )
+
+    assert calls == [
+        ("Collecting: Event log: System", 0.25),
+        ("Collecting: Registry hive: HKLM\\SOFTWARE", 0.5),
+        ("Writing reports", 0.95),
+        ("Done", 1.0),
+    ]
+    fractions = [fraction for _, fraction in calls]
+    assert fractions == sorted(fractions)
+
+
+@pytest.mark.unit
+def test_run_quick_analysis_forwards_stage_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run_analysis(**kwargs: Any) -> Any:
+        kwargs["stage_progress"]("Parsing 1/2", 0.5)
+        return _result_with_one_finding(_case_config(tmp_path), tmp_path)
+
+    monkeypatch.setattr(controller, "run_analysis", fake_run_analysis)
+    calls: list[tuple[str, float]] = []
+    controller.run_quick_analysis(
+        base_dir=tmp_path / "cases",
+        stage_progress=lambda stage, fraction: calls.append((stage, fraction)),
+    )
+    assert calls == [("Parsing 1/2", 0.5)]
+
+
+@pytest.mark.unit
+def test_verify_case_reports_per_artifact_progress(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "a.bin").write_bytes(b"a")
+    (evidence / "b.bin").write_bytes(b"b")
+    _write_manifest(
+        tmp_path / "case",
+        {
+            "config": {"evidence_dir": str(evidence)},
+            "intake_digests": [
+                {"path": "a.bin", "digest": hash_file(evidence / "a.bin")},
+                {"path": "b.bin", "digest": hash_file(evidence / "b.bin")},
+            ],
+        },
+    )
+    calls: list[tuple[str, float]] = []
+    summary = controller.verify_case(
+        tmp_path / "case",
+        stage_progress=lambda stage, fraction: calls.append((stage, fraction)),
+    )
+    assert summary.verified
+    assert calls == [
+        ("Verifying recorded digests", 0.5),
+        ("Verifying recorded digests", 1.0),
+    ]
+
+
+@pytest.mark.unit
+def test_app_progress_bar_shows_percentage() -> None:
+    pytest.importorskip("tkinter")
+    root, window = _build_app_or_skip()
+    try:
+        assert str(window.progress_bar.cget("mode")) == "determinate"
+        window._set_running(True)
+        assert float(window.progress_bar["value"]) == 0.0
+        window._on_progress(("Parsing 2/5", 0.4))
+        assert float(window.progress_bar["value"]) == 40.0
+        assert window.stage_var.get() == "Parsing 2/5 (40%)"
+        window._on_progress(("Done", 1.0))
+        assert float(window.progress_bar["value"]) == 100.0
+        assert window.stage_var.get() == "Done (100%)"
     finally:
         root.destroy()

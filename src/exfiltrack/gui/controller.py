@@ -46,6 +46,10 @@ _GAP_STATUSES = frozenset({"missing", "unavailable", "error"})
 
 ProgressCallback = Callable[[str], None]
 
+# (stage label, fraction complete in [0.0, 1.0]) for the GUI's determinate
+# progress bar (issue #65). Fractions are monotonically non-decreasing.
+StageProgressCallback = Callable[[str, float], None]
+
 
 # ---------------------------------------------------------------------------
 # Display-ready views of pipeline results
@@ -224,6 +228,7 @@ def run_analysis(
     case_id: str,
     examiner: str,
     progress: ProgressCallback | None = None,
+    stage_progress: StageProgressCallback | None = None,
 ) -> PipelineResult:
     """Run the pipeline for the GUI, mirroring the CLI's ``analyze`` command.
 
@@ -236,6 +241,10 @@ def run_analysis(
         case_id, examiner: Recorded in the chain-of-custody manifest.
         progress: Optional callback invoked with one-line status messages so
             the front end can show what stage the run is at.
+        stage_progress: Optional (stage, fraction) callback for the
+            percentage bar (issue #65). Offline runs forward the pipeline's
+            own fractions unchanged; live runs scale collection into 0-50%
+            and the analysis pipeline into 50-100%.
 
     Raises:
         ConfigError: For invalid form input or an unknown mode.
@@ -244,6 +253,9 @@ def run_analysis(
             messages, never raw tracebacks.
     """
     report = progress if progress is not None else (lambda _message: None)
+    report_stage = (
+        stage_progress if stage_progress is not None else (lambda _stage, _fraction: None)
+    )
     if mode == OFFLINE_MODE:
         config = build_offline_config(
             evidence_dir=evidence_dir,
@@ -252,11 +264,16 @@ def run_analysis(
             examiner=examiner,
         )
         report("Running the analysis pipeline; evidence is opened read-only...")
-        return run_pipeline(config, continue_on_parser_error=True)
+        return run_pipeline(config, continue_on_parser_error=True, progress=report_stage)
     if mode == LIVE_MODE:
         target = validate_live_case_dir(case_dir)
         report("Collecting artifacts from this machine (read-only; no logging is changed)...")
-        acquisition = collect_live_evidence(target, case_id=case_id, examiner=examiner)
+        acquisition = collect_live_evidence(
+            target,
+            case_id=case_id,
+            examiner=examiner,
+            progress=lambda label, fraction: report_stage(f"Collecting: {label}", 0.5 * fraction),
+        )
         report(f"Collection coverage: {acquisition.manifest['coverage']}")
         for line in collection_gap_lines(acquisition.manifest):
             report(f"  gap: {line}")
@@ -271,6 +288,7 @@ def run_analysis(
             config,
             acquisition=acquisition.manifest,
             continue_on_parser_error=True,
+            progress=lambda stage, fraction: report_stage(stage, 0.5 + 0.5 * fraction),
         )
     raise ConfigError(f"Unknown analysis mode: {mode!r}.")
 
@@ -339,13 +357,18 @@ def summarize_result(result: PipelineResult) -> AnalysisSummary:
 # ---------------------------------------------------------------------------
 
 
-def verify_case(case_dir: str | Path) -> VerificationSummary:
+def verify_case(
+    case_dir: str | Path, *, stage_progress: StageProgressCallback | None = None
+) -> VerificationSummary:
     """Re-check a case's recorded evidence digests without re-running analysis.
 
     Equivalent to ``exfiltrack verify --case-dir``: reads the manifest,
     resolves each recorded relative path against the recorded evidence
     directory, and recomputes SHA-256 digests. For a live-acquisition case
     the case directory itself is accepted; its ``reports/`` folder is used.
+
+    ``stage_progress``, when given, is called per artifact with the fraction
+    of digests checked so far (issue #65).
 
     Raises:
         ExfilTrackError: If the directory has no manifest, the manifest is
@@ -374,13 +397,18 @@ def verify_case(case_dir: str | Path) -> VerificationSummary:
         raise ExfilTrackError(f"'{manifest_path}' records no evidence directory to verify against.")
     evidence_dir = Path(evidence_value)
 
+    report_stage = (
+        stage_progress if stage_progress is not None else (lambda _stage, _fraction: None)
+    )
+    total = len(digests)
     failures: list[str] = []
-    for record in digests:
+    for index, record in enumerate(digests, 1):
         target = evidence_dir / record["path"]
         try:
             verify_digest(target, record["digest"])
         except (DigestMismatchError, OSError) as exc:
             failures.append(f"{record['path']}: {exc}")
+        report_stage("Verifying recorded digests", index / total)
     return VerificationSummary(
         manifest_path=manifest_path,
         evidence_dir=evidence_dir,
@@ -454,7 +482,10 @@ def prepare_quick_case(
 
 
 def run_quick_analysis(
-    *, progress: ProgressCallback | None = None, base_dir: Path | None = None
+    *,
+    progress: ProgressCallback | None = None,
+    base_dir: Path | None = None,
+    stage_progress: StageProgressCallback | None = None,
 ) -> AnalysisSummary:
     """One-click triage: collect from this machine, analyze, and summarize.
 
@@ -478,6 +509,7 @@ def run_quick_analysis(
         case_id=setup.case_id,
         examiner=setup.examiner,
         progress=progress,
+        stage_progress=stage_progress,
     )
     return summarize_result(result)
 
