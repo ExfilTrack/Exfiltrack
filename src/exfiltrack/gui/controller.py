@@ -33,6 +33,7 @@ from exfiltrack.correlation.confidence import ConfidenceLevel
 from exfiltrack.evidence.hashing import DigestMismatchError, verify_digest
 from exfiltrack.evidence.live import collect_live_evidence
 from exfiltrack.evidence.manifest import MANIFEST_FILENAME, utc_now
+from exfiltrack.normalization.timestamps import parse_utc_date
 from exfiltrack.pipeline import PipelineResult, run_pipeline
 from exfiltrack.reporting.model import Finding
 
@@ -152,6 +153,20 @@ def _require_text(value: str, field_name: str) -> str:
     return value.strip()
 
 
+def _parse_window_date(raw: str) -> datetime | None:
+    """Parse the form's optional analysis-window date (issue #68).
+
+    Empty means no cutoff. Anything else must be exactly ``YYYY-MM-DD`` --
+    the pipeline's timeline is UTC-normalized, so the date means midnight UTC.
+    """
+    if not raw.strip():
+        return None
+    try:
+        return parse_utc_date(raw)
+    except ValueError as exc:
+        raise ConfigError(f"Analysis window date: {exc}") from exc
+
+
 def build_offline_config(
     *, evidence_dir: str, case_output_dir: str, case_id: str, examiner: str
 ) -> CaseConfig:
@@ -229,6 +244,7 @@ def run_analysis(
     examiner: str,
     progress: ProgressCallback | None = None,
     stage_progress: StageProgressCallback | None = None,
+    events_since_text: str = "",
 ) -> PipelineResult:
     """Run the pipeline for the GUI, mirroring the CLI's ``analyze`` command.
 
@@ -245,6 +261,11 @@ def run_analysis(
             percentage bar (issue #65). Offline runs forward the pipeline's
             own fractions unchanged; live runs scale collection into 0-50%
             and the analysis pipeline into 50-100%.
+        events_since_text: Optional ``YYYY-MM-DD`` from the form's
+            analysis-window field (issue #68): only events on/after that date
+            (UTC) are analyzed. Empty means the full evidence set. In live
+            mode the collection still gathers everything; scoping happens at
+            analysis time.
 
     Raises:
         ConfigError: For invalid form input or an unknown mode.
@@ -256,6 +277,9 @@ def run_analysis(
     report_stage = (
         stage_progress if stage_progress is not None else (lambda _stage, _fraction: None)
     )
+    since = _parse_window_date(events_since_text)
+    if since is not None:
+        report(f"Analysis window: only events on/after {since.date().isoformat()} (UTC).")
     if mode == OFFLINE_MODE:
         config = build_offline_config(
             evidence_dir=evidence_dir,
@@ -264,7 +288,12 @@ def run_analysis(
             examiner=examiner,
         )
         report("Running the analysis pipeline; evidence is opened read-only...")
-        return run_pipeline(config, continue_on_parser_error=True, progress=report_stage)
+        return run_pipeline(
+            config,
+            continue_on_parser_error=True,
+            progress=report_stage,
+            events_since=since,
+        )
     if mode == LIVE_MODE:
         target = validate_live_case_dir(case_dir)
         report("Collecting artifacts from this machine (read-only; no logging is changed)...")
@@ -289,6 +318,7 @@ def run_analysis(
             acquisition=acquisition.manifest,
             continue_on_parser_error=True,
             progress=lambda stage, fraction: report_stage(stage, 0.5 + 0.5 * fraction),
+            events_since=since,
         )
     raise ConfigError(f"Unknown analysis mode: {mode!r}.")
 
@@ -486,6 +516,7 @@ def run_quick_analysis(
     progress: ProgressCallback | None = None,
     base_dir: Path | None = None,
     stage_progress: StageProgressCallback | None = None,
+    events_since_text: str = "",
 ) -> AnalysisSummary:
     """One-click triage: collect from this machine, analyze, and summarize.
 
@@ -510,6 +541,7 @@ def run_quick_analysis(
         examiner=setup.examiner,
         progress=progress,
         stage_progress=stage_progress,
+        events_since_text=events_since_text,
     )
     return summarize_result(result)
 

@@ -641,17 +641,28 @@ def test_app_one_click_button_runs_and_opens_report(
     summary = controller.summarize_result(
         _result_with_one_finding(_case_config(tmp_path), tmp_path)
     )
-    monkeypatch.setattr(gui_app.controller, "run_quick_analysis", lambda **kwargs: summary)
+    captured: dict[str, Any] = {}
+
+    def fake_quick(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return summary
+
+    monkeypatch.setattr(gui_app.controller, "run_quick_analysis", fake_quick)
     monkeypatch.setattr(gui_app.messagebox, "askokcancel", lambda *a, **k: True)
     opened: list[Path] = []
     monkeypatch.setattr(gui_app, "_open_in_file_manager", lambda path: opened.append(path))
     root, window = _build_app_or_skip()
     try:
+        window.since_var.set("2026-03-01")
         window.quick_button.invoke()
         assert window._worker is not None
         window._worker.join(timeout=10)
         window._poll_queue()  # drain queued messages without running the mainloop
         assert len(window.findings.get_children()) == 1
+        # Regression (issue #68): the date field must be read on the main
+        # thread and forwarded -- reading it in the worker raised
+        # "main thread is not in main loop".
+        assert captured["events_since_text"] == "2026-03-01"
         assert "consistent with possible exfiltration" in window.verdict_var.get()
         assert opened == [summary.html_report]
         assert str(window.quick_button.cget("state")) == "normal"  # re-enabled at the end
@@ -812,5 +823,114 @@ def test_app_progress_bar_shows_percentage() -> None:
         window._on_progress(("Done", 1.0))
         assert float(window.progress_bar["value"]) == 100.0
         assert window.stage_var.get() == "Done (100%)"
+    finally:
+        root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Analysis window date field (issue #68)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_analysis_rejects_bad_window_date(tmp_path: Path) -> None:
+    config = _case_config(tmp_path)
+    with pytest.raises(ConfigError, match="YYYY-MM-DD"):
+        controller.run_analysis(
+            mode=controller.OFFLINE_MODE,
+            evidence_dir=str(config.evidence_dir),
+            case_dir=str(config.case_output_dir),
+            case_id="CASE-001",
+            examiner="Examiner",
+            events_since_text="15/02/2026",
+        )
+
+
+@pytest.mark.unit
+def test_run_analysis_forwards_window_date(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = _case_config(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def fake_run_pipeline(passed_config: CaseConfig, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(controller, "run_pipeline", fake_run_pipeline)
+    messages: list[str] = []
+    controller.run_analysis(
+        mode=controller.OFFLINE_MODE,
+        evidence_dir=str(config.evidence_dir),
+        case_dir=str(config.case_output_dir),
+        case_id="CASE-001",
+        examiner="Examiner",
+        events_since_text="2026-02-01",
+        progress=messages.append,
+    )
+    assert captured["events_since"] == datetime(2026, 2, 1, tzinfo=timezone.utc)
+    assert any("Analysis window" in message for message in messages)
+
+
+@pytest.mark.unit
+def test_run_analysis_without_window_date_passes_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _case_config(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def fake_run_pipeline(passed_config: CaseConfig, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(controller, "run_pipeline", fake_run_pipeline)
+    controller.run_analysis(
+        mode=controller.OFFLINE_MODE,
+        evidence_dir=str(config.evidence_dir),
+        case_dir=str(config.case_output_dir),
+        case_id="CASE-001",
+        examiner="Examiner",
+    )
+    assert captured["events_since"] is None
+
+
+@pytest.mark.unit
+def test_run_quick_analysis_forwards_window_date(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+    pipeline_result = _result_with_one_finding(_case_config(tmp_path), tmp_path)
+
+    def fake_run_analysis(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return pipeline_result
+
+    monkeypatch.setattr(controller, "run_analysis", fake_run_analysis)
+    controller.run_quick_analysis(base_dir=tmp_path / "cases", events_since_text="2026-01-15")
+    assert captured["events_since_text"] == "2026-01-15"
+
+
+@pytest.mark.unit
+def test_app_window_date_field_reaches_the_worker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pytest.importorskip("tkinter")
+    from exfiltrack.gui import app as gui_app
+
+    captured: dict[str, Any] = {}
+    pipeline_result = _result_with_one_finding(_case_config(tmp_path), tmp_path)
+
+    def fake_run_analysis(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return pipeline_result
+
+    monkeypatch.setattr(gui_app.controller, "run_analysis", fake_run_analysis)
+    root, window = _build_app_or_skip()
+    try:
+        window.since_var.set("2026-02-01")
+        window.run_button.invoke()
+        assert window._worker is not None
+        window._worker.join(timeout=10)
+        window._poll_queue()
+        assert captured["events_since_text"] == "2026-02-01"
+        assert len(window.findings.get_children()) == 1
     finally:
         root.destroy()

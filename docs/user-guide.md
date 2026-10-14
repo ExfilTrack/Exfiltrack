@@ -64,6 +64,8 @@ exfiltrack analyze \
   --examiner "Your Name"
 ```
 
+Add `--since YYYY-MM-DD` to restrict analysis to events on/after that date (UTC) — typically the date the laptop was handed to the employee. The cutoff and the number of excluded events are recorded in `case_manifest.json` and shown in the report, so a scoped run can never be mistaken for a full one.
+
 _To document: full flag reference, exit codes, and what appears on stdout._
 
 ## Automatic Collection on a Live Windows Machine (`--auto`)
@@ -126,9 +128,10 @@ For a case you want to control yourself (existing evidence exports, specific cas
    - **Offline evidence directory** — equivalent to `analyze --evidence`. Pick the evidence folder prepared earlier.
    - **Live acquisition** — equivalent to `analyze --auto`. Run from an elevated terminal and pick a **case directory that does not exist yet**; the evidence picker is disabled because artifacts are collected from the machine.
 3. Pick the **case output directory** (offline mode). It must not be inside the evidence directory; the GUI rejects that before a run starts.
-4. Click **Run Analysis**. The run executes in the background; the bar shows the current stage and the percentage of work done, and any parser warnings appear in the log pane.
-5. Review the findings table — device, session start, risk score, confidence, and whether session boundaries were observed or inferred. **Double-click a row** for the confidence reason and the per-rule score breakdown.
-6. Use **Open HTML Report** or **Open Output Folder** to reach the full report, and **Verify Case Integrity...** to re-check a case's recorded digests (equivalent to `exfiltrack verify`).
+4. Optionally set **Analyze events from (UTC)** — e.g. the date the laptop was handed to the employee. Events before that date are excluded from analysis, and the cutoff is disclosed in the manifest and report. Leave empty for the full evidence set.
+5. Click **Run Analysis**. The run executes in the background; the bar shows the current stage and the percentage of work done, and any parser warnings appear in the log pane.
+6. Review the findings table — device, session start, risk score, confidence, and whether session boundaries were observed or inferred. **Double-click a row** for the confidence reason and the per-rule score breakdown.
+7. Use **Open HTML Report** or **Open Output Folder** to reach the full report, and **Verify Case Integrity...** to re-check a case's recorded digests (equivalent to `exfiltrack verify`).
 
 All CLI rules apply unchanged: evidence is opened read-only, output is never written inside the evidence tree, and errors are shown as messages, not tracebacks. The mandated wording — *"ExfilTrack identifies activity consistent with possible USB-based data exfiltration. Temporal correlation alone does not prove that a file was copied."* — is shown at the bottom of the window.
 
