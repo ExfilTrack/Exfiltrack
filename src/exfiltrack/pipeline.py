@@ -60,6 +60,14 @@ class PipelineError(ExfilTrackError):
     """Raised when the end-to-end pipeline cannot complete a run."""
 
 
+# Stage progress reporter: (human-readable stage, fraction complete in
+# [0.0, 1.0]). Fractions are monotonically non-decreasing and reach exactly
+# 1.0 only when the run finished; the CLI ignores this hook (its stdout
+# prints are unchanged) while the GUI drives its percentage bar with it
+# (issue #65).
+ProgressCallback = Callable[[str, float], None]
+
+
 # ---------------------------------------------------------------------------
 # Parser dispatch
 # ---------------------------------------------------------------------------
@@ -191,6 +199,7 @@ def run_pipeline(
     generated_at: datetime | None = None,
     acquisition: dict[str, Any] | None = None,
     continue_on_parser_error: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> PipelineResult:
     """Run the full ExfilTrack analysis pipeline for one case, start to finish.
 
@@ -230,6 +239,11 @@ def run_pipeline(
             the remaining artifacts. It contributes no events at all (partial
             output from a failing parser is discarded). When ``False`` (the
             default, used for manual analysis) the error propagates.
+        progress: Optional :data:`ProgressCallback` invoked at every stage
+            boundary and once per artifact during parsing (the dominant
+            stage), so front ends can show a real percentage (issue #65).
+            Every reported fraction corresponds to completed work; nothing
+            is fabricated.
 
     Returns:
         A :class:`PipelineResult` holding every intermediate and final
@@ -242,13 +256,17 @@ def run_pipeline(
         ReportError: Propagated unchanged from the stage that raised them
             (Non-Negotiable #4: malformed input is never silently skipped).
     """
+    report = progress if progress is not None else (lambda _stage, _fraction: None)
+
     evidence_dir = config.resolved_evidence_dir
     print("Discovering artifacts...")
+    report("Discovering artifacts", 0.0)
     artifacts = discover_artifacts(evidence_dir)
     if not artifacts:
         raise PipelineError(f"No evidence artifacts found under '{evidence_dir}'.")
 
     print(f"Hashing {len(artifacts)} discovered artifacts for intake manifest...")
+    report("Hashing evidence at intake", 0.05)
     manifest = CaseManifest.from_config(config, artifacts, start_time=start_time)
     if acquisition is not None:
         _verify_acquisition(manifest, acquisition)
@@ -266,6 +284,8 @@ def run_pipeline(
         module = _PARSER_MODULES[artifact.artifact_type]
         safe_name = artifact.path.name.encode("utf-8", "backslashreplace").decode("utf-8")
         print(f"Parsing {i}/{total_artifacts}: {safe_name}...")
+        # Parsing dominates runtime, so it carries the largest share.
+        report(f"Parsing {i}/{total_artifacts}", 0.10 + 0.60 * (i - 1) / total_artifacts)
         key = (module.PARSER_NAME, module.PARSER_VERSION)
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
         try:
@@ -291,12 +311,15 @@ def run_pipeline(
     manifest.parser_records = [parser_records[key] for key in sorted(parser_records)]
 
     print(f"Normalizing and sorting {len(events)} events into timeline...")
+    report("Normalizing the timeline", 0.70)
     timeline = sort_events(events)
 
     print("Reconstructing USB sessions...")
+    report("Reconstructing USB sessions", 0.75)
     sessions = reconstruct_sessions(timeline, config=session_config)
 
     print(f"Scoring and evaluating confidence for {len(sessions)} sessions...")
+    report("Scoring and confidence evaluation", 0.80)
     findings = assemble_findings(
         sessions,
         weights=scoring_weights,
@@ -305,6 +328,7 @@ def run_pipeline(
     )
 
     print("Re-hashing evidence to verify integrity (post-analysis)...")
+    report("Verifying evidence integrity", 0.85)
     manifest.post_analysis_digests = [
         DigestRecord(path=record.path, digest=hash_file(evidence_dir / record.path))
         for record in manifest.intake_digests
@@ -319,6 +343,7 @@ def run_pipeline(
     report_paths: dict[str, Path] = {}
     if write_reports:
         print("Generating case reports (Manifest, JSON, CSV, HTML)...")
+        report("Writing reports", 0.90)
         output_dir = config.resolved_case_output_dir
         report_paths["manifest"] = write_manifest(manifest, output_dir)
         report_paths["json"] = write_json_report(list(findings), manifest, output_dir)
@@ -334,6 +359,7 @@ def run_pipeline(
         )
         print(f"Reports successfully written to: {output_dir}")
 
+    report("Done", 1.0)
     return PipelineResult(
         manifest=manifest,
         artifacts=tuple(artifacts),
