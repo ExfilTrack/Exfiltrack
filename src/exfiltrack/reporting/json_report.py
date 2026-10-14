@@ -16,6 +16,7 @@ from typing import Any
 
 from exfiltrack.config import ExfilTrackError
 from exfiltrack.correlation.models import NormalizedEvent
+from exfiltrack.correlation.sessions import UsbSession
 from exfiltrack.evidence.manifest import CaseManifest
 from exfiltrack.reporting.model import Finding
 
@@ -46,6 +47,22 @@ def _event_to_dict(event: NormalizedEvent) -> dict[str, Any]:
     }
 
 
+def _reported_device_ids(session: UsbSession) -> list[str]:
+    """The raw device instance ids the sources actually recorded (#70).
+
+    The session's ``device_id`` is the canonical merged form; these are the
+    original spellings (e.g. the WPD-wrapped one) preserved for provenance.
+    Empty when every source already used the canonical form.
+    """
+    reported: set[str] = set()
+    for boundary in (session.start, session.end):
+        if boundary.source_event is not None:
+            raw = boundary.source_event.details.get("reported_device_id")
+            if isinstance(raw, str):
+                reported.add(raw)
+    return sorted(reported)
+
+
 def _finding_to_dict(finding: Finding) -> dict[str, Any]:
     session = finding.session
     return {
@@ -56,6 +73,7 @@ def _finding_to_dict(finding: Finding) -> dict[str, Any]:
             "vendor": session.device.vendor,
             "product": session.device.product,
             "friendly_name": session.device.friendly_name,
+            "reported_device_ids": _reported_device_ids(session),
         },
         "start": {
             "timestamp_utc": session.start.timestamp_utc.isoformat(),
