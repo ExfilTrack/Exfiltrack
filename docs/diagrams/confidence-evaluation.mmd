@@ -1,0 +1,11 @@
+%% Confidence evaluation decision flow — embedded in docs/final-report.md (Figure 3).
+flowchart TD
+    S["Scored session: total score plus fired rules"] --> H{"destination_hash_match fired?"}
+    H -->|"Yes"| C["CONFIRMED: file hash matched the destination USB"]
+    H -->|"No"| HI{"score >= 60 and both boundaries observed?"}
+    HI -->|"Yes"| HIGH["HIGH"]
+    HI -->|"No"| MED{"score >= 40 or multiple_confidential_files fired?"}
+    MED -->|"Yes"| M["MEDIUM"]
+    MED -->|"No"| LO{"score > 0?"}
+    LO -->|"Yes"| L["LOW"]
+    LO -->|"No"| N["NONE: no scoring rule fired"]

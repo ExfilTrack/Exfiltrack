@@ -1,0 +1,15 @@
+%% USB session reconstruction rules — embedded in docs/final-report.md (Figure 2).
+flowchart TD
+    E["Per-device insert/remove events, time ordered"] --> Q1{"insert while a session is open?"}
+    Q1 -->|"Yes - double insert"| CLOSE["Close the open session: inferred end at the new insert"]
+    Q1 -->|"No"| OPEN["Open a session: observed start"]
+    CLOSE --> OPEN
+    OPEN --> Q2{"what ends it?"}
+    Q2 -->|"remove event"| OBS["Observed end: fully observed session"]
+    Q2 -->|"nothing follows"| INF["Infer end at start plus idle gap"]
+    ORPH["Orphan removal with no open session"] --> ORPHSTART["Start inferred one idle gap before the removal"]
+    OBS --> ATTACH
+    INF --> ATTACH
+    ORPHSTART --> ATTACH
+    ATTACH["Attach file-access events whose timestamps fall inside the window"]
+    ATTACH --> MARK["Mark boundary provenance: event_log, registry_properties, or inferred"]
