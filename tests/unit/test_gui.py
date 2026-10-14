@@ -551,6 +551,21 @@ def test_prepare_quick_case_defaults_examiner_to_logged_on_user(tmp_path: Path) 
 
 
 @pytest.mark.unit
+def test_prepare_quick_case_default_root_by_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(controller.sys, "platform", "win32")
+    setup_win = controller.prepare_quick_case(
+        now=datetime(2026, 10, 8, 12, 34, 56, tzinfo=timezone.utc), user="analyst"
+    )
+    assert setup_win.case_dir.parent == Path("C:/ExfilTrackCases")
+
+    monkeypatch.setattr(controller.sys, "platform", "linux")
+    setup_linux = controller.prepare_quick_case(
+        now=datetime(2026, 10, 8, 12, 34, 56, tzinfo=timezone.utc), user="analyst"
+    )
+    assert setup_linux.case_dir.parent == Path.home() / "ExfilTrackCases"
+
+
+@pytest.mark.unit
 def test_run_quick_analysis_uses_live_mode_with_generated_case(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

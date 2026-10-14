@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -476,11 +477,12 @@ def prepare_quick_case(
     now: datetime | None = None,
     user: str | None = None,
 ) -> QuickCaseSetup:
-    """Generate the metadata a one-click run needs, with no form fields at all.
+    r"""Generate the metadata a one-click run needs, with no form fields at all.
 
     Parameters:
         base_dir: Parent for the new case directory. Defaults to
-            ``~/ExfilTrackCases``. Injected by tests.
+            ``C:\ExfilTrackCases`` on Windows, or ``~/ExfilTrackCases`` elsewhere.
+            Injected by tests.
         now: Timestamp used for the case ID; defaults to the current UTC
             time. Injected by tests for determinism.
         user: Examiner name; defaults to the logged-on user.
@@ -500,7 +502,12 @@ def prepare_quick_case(
             examiner = ""
         if not examiner.strip():
             examiner = "unknown"
-    root = base_dir if base_dir is not None else Path.home() / "ExfilTrackCases"
+    if base_dir is not None:
+        root = base_dir
+    elif sys.platform == "win32":
+        root = Path("C:/ExfilTrackCases")
+    else:
+        root = Path.home() / "ExfilTrackCases"
     case_id = base_id
     case_dir = root / case_id
     suffix = 2
