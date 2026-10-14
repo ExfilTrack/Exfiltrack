@@ -88,8 +88,9 @@
                     <div class="device-sub mono">S/N {{ session.device.serial_number }}</div>
                   {% endif %}
                 </td>
-                <td class="mono">
-                  {{ session.start.timestamp_utc | fmt_ts }} &ndash; {{ session.end.timestamp_utc | fmt_ts }}
+                <td class="mono window-cell">
+                  <div>{{ session.start.timestamp_utc | fmt_ts }}</div>
+                  <div>{{ session.end.timestamp_utc | fmt_ts }}</div>
                   {% if not session.is_fully_observed %}
                     <span class="badge badge-inferred">inferred boundary</span>
                   {% endif %}

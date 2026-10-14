@@ -215,7 +215,33 @@ code, .mono {
   font-style: italic;
 }
 
-.summary-table td:first-child { width: 2.5rem; }
+/* Fixed layout: the Device column can carry a raw device-instance ID (one
+   very long unbroken token), which would otherwise hog the table and crush
+   the Window/Confidence columns. Fixed widths + anywhere-wrapping keep every
+   column readable. */
+.summary-table {
+  table-layout: fixed;
+}
+
+.summary-table th:nth-child(1) { width: 2.5rem; }
+.summary-table th:nth-child(2) { width: auto; }
+.summary-table th:nth-child(3) { width: 11rem; }
+.summary-table th:nth-child(4) { width: 6.5rem; }
+.summary-table th:nth-child(5) { width: 4.5rem; }
+.summary-table th:nth-child(6) { width: 5.5rem; }
+
+.summary-table td {
+  overflow-wrap: anywhere;
+}
+
+.summary-table .window-cell .badge {
+  margin-top: 0.25rem;
+}
+
+.session-header .device-name,
+.session-header .session-window {
+  overflow-wrap: anywhere;
+}
 
 .device-sub {
   color: var(--muted);
