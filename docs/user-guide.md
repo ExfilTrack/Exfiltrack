@@ -147,7 +147,7 @@ exfiltrack-gui
 python -m exfiltrack.gui
 ```
 
-**Fastest path — One-Click Report.** Click **One-Click Report (this machine)** and confirm the prompt: ExfilTrack generates the case ID, examiner, and a fresh case directory under `~/ExfilTrackCases/` by itself, collects this machine's logs (read-only — exactly what `analyze --auto` does), analyzes them, states in the window whether any reconstructed session is consistent with possible USB exfiltration, and opens the HTML report. Run from an elevated terminal for full coverage; without it, the sources that could not be collected are listed in the report's *Evidence Coverage* section.
+**Fastest path — One-Click Report.** Click **One-Click Report (this machine)** and confirm the prompt: ExfilTrack generates the case ID, examiner, and a fresh case directory under `C:\ExfilTrackCases\` (or `~/ExfilTrackCases/` on non-Windows) by itself, collects this machine's logs (read-only — exactly what `analyze --auto` does), analyzes them, states in the window whether any reconstructed session is consistent with possible USB exfiltration, and opens the HTML report. Run from an elevated terminal for full coverage; without it, the sources that could not be collected are listed in the report's *Evidence Coverage* section.
 
 For a case you want to control yourself (existing evidence exports, specific case directory):
 
@@ -188,7 +188,7 @@ Use this option for a fast triage of the computer currently running ExfilTrack.
 5. Review the summary and select **Open HTML Report**.
 
 The one-click workflow is equivalent to `analyze --auto`. ExfilTrack creates the
-case ID, examiner label, and a new case directory below `~/ExfilTrackCases/`.
+case ID, examiner label, and a new case directory below `C:\ExfilTrackCases\` (or `~/ExfilTrackCases/` on non-Windows).
 Run elevated for the best collection coverage. Any unavailable source appears
 under **Evidence Coverage** in the report.
 
