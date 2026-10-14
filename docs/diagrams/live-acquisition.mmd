@@ -1,0 +1,9 @@
+%% Live acquisition and one-click flow — embedded in docs/final-report.md (Figure 4).
+flowchart LR
+    A["One-Click Report button, or analyze --auto"] --> B["Preflight: Windows, elevated token, fresh case directory"]
+    B --> C["Collect, read-only: event logs via wevtutil, hives via reg save, per-user Recent and Jump Lists"]
+    C --> D["acquisition_manifest.json: per-source status and digests"]
+    D --> E{"Snapshots still match the manifest?"}
+    E -->|"No"| X["Refuse to analyze"]
+    E -->|"Yes"| F["Analysis pipeline, identical to offline mode"]
+    F --> G["Report: Evidence Coverage, findings, integrity verdict"]

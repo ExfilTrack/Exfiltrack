@@ -1,0 +1,20 @@
+%% ExfilTrack system architecture — embedded in docs/final-report.md (Figure 1).
+flowchart TD
+    CLI["exfiltrack CLI: analyze, verify, --since"] --> CFG
+    GUIAPP["exfiltrack-gui: offline, live, one-click"] --> CTRL["GUI controller: validation, background workers"]
+    CTRL --> CFG
+    LIVE["Live acquisition: wevtutil and reg save snapshots, read-only"] --> ACQ["acquisition_manifest.json"]
+    ACQ --> CFG["CaseConfig: validated, output never inside evidence"]
+    CFG --> INTAKE["1. Evidence intake: discover and classify, read-only"]
+    INTAKE --> HASH["2. SHA-256 hashing at intake"]
+    HASH --> PARSE["3. Parsers: registry, EVTX, LNK, Jump Lists"]
+    PARSE --> NORM["4. Normalize: NormalizedEvent, strict UTC"]
+    NORM --> IDENT["Device identity merge: WPD unwrapped to USBSTOR"]
+    IDENT --> WINDOWF["Analysis window filter: optional --since date"]
+    WINDOWF --> SESS["5. USB session reconstruction, storage devices only"]
+    SESS --> SCORE["6a. Risk scoring: explainable rules"]
+    SCORE --> CONF["6b. Confidence: Low / Medium / High / Confirmed"]
+    CONF --> REP["7. Reports: report.html, findings.json, findings.csv, timeline.csv, coverage.csv"]
+    CONF --> MAN["case_manifest.json: chain of custody, coverage, window"]
+    HASH --> VERIFY["Post-analysis re-hash: integrity verdict"]
+    VERIFY --> MAN

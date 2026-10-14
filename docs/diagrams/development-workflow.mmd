@@ -1,0 +1,13 @@
+%% Development workflow — embedded in docs/final-report.md (Figure 5).
+gitGraph
+    commit id: "init"
+    branch develop
+    checkout develop
+    commit id: "scaffolding and CI"
+    branch "feature/owner-topic"
+    checkout "feature/owner-topic"
+    commit id: "change plus tests"
+    checkout develop
+    merge "feature/owner-topic" id: "PR: review + CI green"
+    checkout main
+    merge develop id: "release-ready"
