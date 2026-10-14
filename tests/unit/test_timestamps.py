@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from exfiltrack.normalization.timestamps import parse_dos_datetime, parse_filetime, parse_iso8601
+from exfiltrack.normalization.timestamps import (
+    parse_dos_datetime,
+    parse_filetime,
+    parse_iso8601,
+    parse_utc_date,
+)
 
 
 class DummyTz(tzinfo):
@@ -126,3 +131,18 @@ def test_parse_iso8601_offset_conversion():
     # 2023-01-01T14:00:00+02:00 -> 2023-01-01T12:00:00Z
     dt = parse_iso8601("2023-01-01T14:00:00+02:00")
     assert dt == datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def test_parse_utc_date_is_midnight_utc():
+    assert parse_utc_date("2026-01-15") == datetime(2026, 1, 15, 0, 0, 0, tzinfo=timezone.utc)
+    # Surrounding whitespace from a form field is tolerated.
+    assert parse_utc_date("  2026-01-15  ") == datetime(2026, 1, 15, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["2026-1-5", "15/01/2026", "2026-02-30", "hello", "", "2026-01-15T00:00:00Z"],
+)
+def test_parse_utc_date_rejects_bad_input(raw):
+    with pytest.raises(ValueError):
+        parse_utc_date(raw)
