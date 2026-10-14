@@ -68,6 +68,7 @@ class ExfilTrackApp:
         self.case_dir_var = tk.StringVar()
         self.case_dir_label_var = tk.StringVar(value="Case output directory:")
         self.status_var = tk.StringVar(value="Idle.")
+        self.stage_var = tk.StringVar(value="")
         self.summary_var = tk.StringVar(value="No analysis run yet.")
         self.integrity_var = tk.StringVar(value="")
         self.verdict_var = tk.StringVar(value="")
@@ -180,10 +181,16 @@ class ExfilTrackApp:
         middle.rowconfigure(1, weight=1)
         middle.columnconfigure(0, weight=1)
 
-        self.progress_bar = ttk.Progressbar(middle, mode="indeterminate")
+        # Determinate bar: the pipeline and the live collector report real
+        # per-stage fractions (issue #65), so the percentage is actual work
+        # done, never a fabricated pulse.
+        self.progress_bar = ttk.Progressbar(middle, mode="determinate", maximum=100.0)
         self.progress_bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(middle, textvariable=self.stage_var, width=34, anchor=tk.E).grid(
+            row=0, column=1, sticky="e", padx=(8, 0)
+        )
         ttk.Label(middle, textvariable=self.status_var).grid(
-            row=0, column=1, sticky="w", padx=(8, 0)
+            row=0, column=2, sticky="w", padx=(8, 0)
         )
         self.log = ScrolledText(middle, height=8, state=tk.DISABLED, wrap=tk.WORD)
         self.log.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
@@ -349,6 +356,9 @@ class ExfilTrackApp:
                 case_id=case_id,
                 examiner=examiner,
                 progress=lambda message: self._queue.put(("log", message)),
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
             )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
@@ -362,7 +372,10 @@ class ExfilTrackApp:
     def _run_quick_worker(self) -> None:
         try:
             summary = controller.run_quick_analysis(
-                progress=lambda message: self._queue.put(("log", message))
+                progress=lambda message: self._queue.put(("log", message)),
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
             )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
@@ -375,7 +388,12 @@ class ExfilTrackApp:
 
     def _run_verify_worker(self, case_dir: str) -> None:
         try:
-            summary = controller.verify_case(case_dir)
+            summary = controller.verify_case(
+                case_dir,
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
+            )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
         except Exception as exc:  # unexpected; still no raw traceback for the analyst
@@ -395,6 +413,8 @@ class ExfilTrackApp:
                 kind, payload = self._queue.get_nowait()
                 if kind == "log":
                     self._append_log(payload)
+                elif kind == "progress":
+                    self._on_progress(payload)
                 elif kind == "result":
                     self._show_summary(payload)
                 elif kind == "quick-result":
@@ -409,6 +429,14 @@ class ExfilTrackApp:
         except queue.Empty:
             pass
         self.root.after(_QUEUE_POLL_MS, self._poll_queue)
+
+    def _on_progress(self, payload: tuple[str, float]) -> None:
+        """Update the percentage bar from a (stage, fraction) worker message."""
+        stage, fraction = payload
+        percent = round(fraction * 100)
+        percent = max(0, min(100, percent))
+        self.progress_bar["value"] = percent
+        self.stage_var.set(f"{stage} ({percent}%)")
 
     def _show_summary(self, summary: AnalysisSummary) -> None:
         self._summary = summary
@@ -453,6 +481,8 @@ class ExfilTrackApp:
             self.open_html_button.configure(state=tk.NORMAL)
         if summary.output_dir.parts:
             self.open_folder_button.configure(state=tk.NORMAL)
+        self.progress_bar["value"] = 100
+        self.stage_var.set("Done (100%)")
         self.status_var.set("Analysis complete.")
 
     def _open_report_after_quick(self, summary: AnalysisSummary) -> None:
@@ -479,6 +509,8 @@ class ExfilTrackApp:
             messagebox.showwarning(
                 "Verify case", message + "\nSee the log pane for details.", parent=self.root
             )
+        self.progress_bar["value"] = 100
+        self.stage_var.set("Done (100%)")
         self.status_var.set("Verification complete.")
 
     def _show_error(self, message: str) -> None:
@@ -512,9 +544,9 @@ class ExfilTrackApp:
         self.quick_button.configure(state=state)
         if running:
             self.status_var.set("Working...")
-            self.progress_bar.start(12)
-        else:
-            self.progress_bar.stop()
+            self.stage_var.set("")
+            self.progress_bar["value"] = 0
+        # When finished, the bar keeps its last value (100% on success).
 
 
 def main() -> int:

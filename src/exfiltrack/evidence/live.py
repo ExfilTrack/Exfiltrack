@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -540,7 +541,12 @@ class _Collector:
 
 
 def collect_live_evidence(
-    case_dir: Path, *, case_id: str, examiner: str, command_timeout: int = 120
+    case_dir: Path,
+    *,
+    case_id: str,
+    examiner: str,
+    command_timeout: int = 120,
+    progress: Callable[[str, float], None] | None = None,
 ) -> AcquisitionResult:
     """Acquire selected artifacts into a strictly fresh case on elevated Windows.
 
@@ -548,6 +554,10 @@ def collect_live_evidence(
     are acquired, persist the diagnostic manifest and raise ``AcquisitionError``
     containing its path. Preflight refusal creates no case and runs no commands.
     The caller owns CLI/pipeline integration; this function never analyses evidence.
+
+    ``progress``, when given, is called after every collected source with a
+    human-readable label and the fraction of sources done so far, so front
+    ends can show real percentage progress (issue #65).
     """
     if platform.system() != "Windows":
         raise AcquisitionError("Live evidence acquisition requires Windows.")
@@ -579,8 +589,28 @@ def collect_live_evidence(
     except OSError as exc:
         raise AcquisitionError(f"Cannot create fresh case '{case_dir}': {exc}") from exc
     collector = _Collector(case_dir, command_timeout, discovery.records)
+    # Progress bookkeeping (issue #65): every source operation below is one
+    # step, so the fraction reported is real work done, never fabricated.
+    total_steps = (
+        len(_CHANNELS)
+        + 2  # HKLM hives
+        + len(discovery.loaded_sids or ())
+        + sum(
+            (0 if discovery.loaded_sids is not None and sid in discovery.loaded_sids else 1) + 3
+            for sid in discovery.profiles
+        )
+    )
+    steps_done = 0
+
+    def _step(label: str) -> None:
+        nonlocal steps_done
+        steps_done += 1
+        if progress is not None:
+            progress(label, steps_done / total_steps)
+
     for channel in _CHANNELS:
         collector.channel(tools / "wevtutil.exe", channel)
+        _step(f"Event log: {channel}")
     for hive in ("SYSTEM", "SOFTWARE"):
         collector.export(
             "registry",
@@ -590,6 +620,7 @@ def collect_live_evidence(
             tools / "reg.exe",
             ["save", f"HKLM\\{hive}"],
         )
+        _step(f"Registry hive: HKLM\\{hive}")
     for sid in sorted(discovery.loaded_sids or ()):
         collector.export(
             "registry",
@@ -599,6 +630,7 @@ def collect_live_evidence(
             tools / "reg.exe",
             ["save", f"HKU\\{sid}"],
         )
+        _step(f"User hive: {sid}")
     for sid, profile in sorted(discovery.profiles.items()):
         relative = Path("users") / sid
         if discovery.loaded_sids is None:
@@ -608,15 +640,19 @@ def collect_live_evidence(
                 message="Loaded hive state is unknown; no direct hive copy attempted.",
             )
             collector.records.append(record)
+            _step(f"User hive: {sid}")
         elif sid not in discovery.loaded_sids:
             collector.copy(profile / "NTUSER.DAT", relative / "NTUSER.DAT", "registry")
+            _step(f"User hive: {sid}")
         recent = profile / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent"
         collector.directory(recent, relative / "Recent", "lnk", ".lnk")
+        _step(f"Recent shortcuts: {profile.name}")
         for folder, suffix in (
             ("AutomaticDestinations", ".automaticdestinations-ms"),
             ("CustomDestinations", ".customdestinations-ms"),
         ):
             collector.directory(recent / folder, relative / "Recent" / folder, "jump_list", suffix)
+            _step(f"Jump Lists ({folder}): {profile.name}")
     manifest = {
         "schema_version": "1.0",
         "case_id": case_id,
