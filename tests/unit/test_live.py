@@ -295,6 +295,20 @@ def _find(result: live.AcquisitionResult, source: str, method: str | None = None
     )
 
 
+def test_collection_reports_monotonic_per_source_progress(tmp_path: Path) -> None:
+    """The GUI's percentage bar rides on these fractions (issue #65)."""
+    calls: list[tuple[str, float]] = []
+    result = _collect(tmp_path, progress=lambda label, fraction: calls.append((label, fraction)))
+
+    assert result.manifest["records"]
+    assert len(calls) >= len(live._CHANNELS) + 2  # channels plus the two HKLM hives
+    fractions = [fraction for _, fraction in calls]
+    assert fractions[-1] == 1.0
+    assert fractions == sorted(fractions)  # monotonically non-decreasing
+    assert all(0.0 < fraction <= 1.0 for fraction in fractions)
+    assert all(label.strip() for label, _ in calls)
+
+
 def _reparse(monkeypatch: pytest.MonkeyPatch, target: Path, *, symlink: bool = False) -> None:
     real_lstat = Path.lstat
 
