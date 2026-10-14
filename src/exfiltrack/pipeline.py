@@ -43,6 +43,11 @@ from exfiltrack.evidence.manifest import (
     utc_now,
     write_manifest,
 )
+from exfiltrack.normalization.device_identity import (
+    is_probable_storage_device,
+    prefer_event_log_boundaries,
+    resolve_device_identities,
+)
 from exfiltrack.normalization.event_model import NormalizedEvent, sort_events
 from exfiltrack.parsers import evtx_parser, jumplist_parser, lnk_parser, registry_parser
 from exfiltrack.reporting.coverage import EvidenceCoverage, build_coverage
@@ -358,6 +363,12 @@ def run_pipeline(
 
     manifest.parser_records = [parser_records[key] for key in sorted(parser_records)]
 
+    # One physical stick must be one device (#70): the event log spells it
+    # SWD\WPDBUSENUM\... while the registry spells it USBSTOR\... . Merging is
+    # exact-match on the canonical id; the raw spellings are preserved in the
+    # events' details as reported_device_id.
+    events = resolve_device_identities(events)
+
     # Record which expected sources were present, absent, or empty, so a clean
     # report from an unconfigured endpoint can no longer read as an
     # exoneration (issue #34). Depends only on intake records, parsed events,
@@ -371,7 +382,24 @@ def run_pipeline(
 
     print("Reconstructing USB sessions...")
     report("Reconstructing USB sessions", 0.75)
-    sessions = reconstruct_sessions(timeline, config=session_config)
+    # Session input (#70): registry-property boundaries that duplicate an
+    # event-log record of the same (un)plug yield to it, and device events
+    # that cannot belong to USB storage (keyboards, phones, driver/system
+    # entries) never form sessions. Both stay in the full timeline
+    # (result.events); only reconstruction sees the narrowed view.
+    analysis_events = prefer_event_log_boundaries(timeline)
+    analysis_events = [
+        event
+        for event in analysis_events
+        if event.device is None or is_probable_storage_device(event.device.device_id)
+    ]
+    skipped = len(timeline) - len(analysis_events)
+    if skipped:
+        print(
+            f"Excluded {skipped} non-USB-storage or duplicate device event(s) "
+            "from session reconstruction; they remain in the timeline."
+        )
+    sessions = reconstruct_sessions(analysis_events, config=session_config)
 
     print(f"Scoring and evaluating confidence for {len(sessions)} sessions...")
     report("Scoring and confidence evaluation", 0.80)

@@ -8,6 +8,7 @@ USBSTOR key (mixed case).
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -190,3 +191,149 @@ def test_resolve_does_not_mutate_input_events() -> None:
     resolve_device_identities([event])
     assert event.device is wpd_device
     assert "reported_device_id" not in event.details
+
+
+# ---------------------------------------------------------------------------
+# Pipeline integration: the session stream is canonical and storage-only
+# ---------------------------------------------------------------------------
+
+
+def _run_two_artifact_case(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    evtx_events: list,
+    registry_events: list,
+):
+    """One EVTX artifact (event-log view) + one SYSTEM hive (registry view)."""
+    from exfiltrack.config import CaseConfig
+    from exfiltrack.evidence.intake import ArtifactType
+    from exfiltrack.pipeline import _DISPATCH, run_pipeline
+
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    evtx_path = evidence_dir / "dfu.evtx"
+    evtx_path.write_bytes(b"ElfFile\x00" + bytes(64))
+    hive_path = evidence_dir / "SYSTEM"
+    hive_path.write_bytes(b"regf" + bytes(64))
+
+    monkeypatch.setitem(_DISPATCH, ArtifactType.EVTX, lambda path: evtx_events)
+    monkeypatch.setitem(_DISPATCH, ArtifactType.REGISTRY, lambda path: registry_events)
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-70",
+        examiner="J. Doe",
+    )
+    return run_pipeline(config)
+
+
+@pytest.mark.unit
+def test_pipeline_merges_wpd_and_registry_into_one_named_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The user's Kingston: one stick, two spellings, one friendly session."""
+    import json
+
+    evtx_path = (tmp_path / "evidence" / "dfu.evtx").resolve().as_posix()
+    hive_path = (tmp_path / "evidence" / "SYSTEM").resolve().as_posix()
+    wpd = _wpd_device()
+    registry = _registry_device()
+    evtx_events = [
+        make_insert_event(BASE, wpd, source_artifact=evtx_path),
+        make_remove_event(BASE + timedelta(minutes=10), wpd, source_artifact=evtx_path),
+    ]
+    registry_events = [
+        make_insert_event(
+            BASE + timedelta(seconds=4),
+            registry,
+            source_artifact=hive_path,
+            details={"records_most_recent_only": True},
+        ),
+        make_remove_event(
+            BASE + timedelta(minutes=10, seconds=3),
+            registry,
+            source_artifact=hive_path,
+            details={"records_most_recent_only": True},
+        ),
+    ]
+
+    result = _run_two_artifact_case(
+        monkeypatch, tmp_path, evtx_events=evtx_events, registry_events=registry_events
+    )
+
+    [session] = result.sessions
+    assert session.device.device_id == KINGSTON_CANONICAL
+    assert session.device.display_name == "Kingston DataTraveler 3.0"
+    # Event-log boundaries win; the registry duplicates did not double it.
+    assert session.boundary_sources == ("event_log", "event_log")
+
+    payload = json.loads(result.report_paths["json"].read_text(encoding="utf-8"))
+    device = payload["findings"][0]["device"]
+    assert device["friendly_name"] == "Kingston DataTraveler 3.0"
+    assert device["device_id"] == KINGSTON_CANONICAL
+    html = result.report_paths["html"].read_text(encoding="utf-8")
+    assert "Kingston DataTraveler 3.0" in html
+
+
+@pytest.mark.unit
+def test_pipeline_excludes_non_storage_devices_from_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Driver/system entries never form sessions, but stay in the timeline."""
+    evtx_path = (tmp_path / "evidence" / "dfu.evtx").resolve().as_posix()
+    wpd = _wpd_device()
+    driverish = make_device(
+        device_id=r"SWD\DEVICECONTROL\1&2A3B4C5D&0&0000",
+        serial_number="",
+        vendor="",
+        product="",
+        friendly_name="",
+    )
+    evtx_events = [
+        make_insert_event(BASE, wpd, source_artifact=evtx_path),
+        make_remove_event(BASE + timedelta(minutes=10), wpd, source_artifact=evtx_path),
+        make_insert_event(BASE + timedelta(minutes=1), driverish, source_artifact=evtx_path),
+        make_remove_event(BASE + timedelta(minutes=2), driverish, source_artifact=evtx_path),
+    ]
+
+    result = _run_two_artifact_case(
+        monkeypatch, tmp_path, evtx_events=evtx_events, registry_events=[]
+    )
+
+    [session] = result.sessions
+    assert session.device.device_id == KINGSTON_CANONICAL
+    # The non-storage events are not erased: the full timeline keeps them.
+    assert len(result.events) == 4
+    assert "Excluded 2 non-USB-storage" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_pipeline_still_sessions_from_registry_boundaries_when_channel_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """DriverFrameworks off: registry 0066/0067 alone still yield a session."""
+    hive_path = (tmp_path / "evidence" / "SYSTEM").resolve().as_posix()
+    registry = _registry_device()
+    registry_events = [
+        make_insert_event(
+            BASE,
+            registry,
+            source_artifact=hive_path,
+            details={"records_most_recent_only": True},
+        ),
+        make_remove_event(
+            BASE + timedelta(minutes=10),
+            registry,
+            source_artifact=hive_path,
+            details={"records_most_recent_only": True},
+        ),
+    ]
+
+    result = _run_two_artifact_case(
+        monkeypatch, tmp_path, evtx_events=[], registry_events=registry_events
+    )
+
+    [session] = result.sessions
+    assert session.boundary_sources == ("registry_properties", "registry_properties")
+    assert session.partial_coverage  # the #35 marker still fires
