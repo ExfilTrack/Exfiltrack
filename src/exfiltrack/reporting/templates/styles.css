@@ -225,24 +225,13 @@ code, .mono {
 
 .summary-table th:nth-child(1) { width: 2.5rem; }
 .summary-table th:nth-child(2) { width: auto; }
-.summary-table th:nth-child(3) { width: 14.5rem; }
+.summary-table th:nth-child(3) { width: 11rem; }
 .summary-table th:nth-child(4) { width: 6.5rem; }
 .summary-table th:nth-child(5) { width: 4.5rem; }
 .summary-table th:nth-child(6) { width: 5.5rem; }
 
 .summary-table td {
   overflow-wrap: anywhere;
-}
-
-/* Timestamps must never be split mid-token ("...07:22:06 UT / C" reads as
-   cropped). Start and end each sit on their own unbreakable line; the Device
-   column is the one that absorbs wrapping. */
-.summary-table .window-cell {
-  overflow-wrap: normal;
-}
-
-.summary-table .window-cell > div {
-  white-space: nowrap;
 }
 
 .summary-table .window-cell .badge {
