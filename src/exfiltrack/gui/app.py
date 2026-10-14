@@ -63,6 +63,7 @@ class ExfilTrackApp:
 
         self.case_id_var = tk.StringVar()
         self.examiner_var = tk.StringVar()
+        self.since_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=controller.OFFLINE_MODE)
         self.evidence_var = tk.StringVar()
         self.case_dir_var = tk.StringVar()
@@ -168,12 +169,22 @@ class ExfilTrackApp:
             form, text="Browse...", command=lambda: self._browse_directory(self.case_dir_var)
         ).grid(row=4, column=2, padx=(6, 0), pady=2)
 
+        ttk.Label(form, text="Analyze events from (UTC):").grid(row=5, column=0, sticky="w")
+        ttk.Entry(form, textvariable=self.since_var, width=14).grid(
+            row=5, column=1, sticky="w", padx=(6, 0), pady=2
+        )
+        ttk.Label(
+            form,
+            text="YYYY-MM-DD, optional -- e.g. the date the laptop was handed over",
+            foreground="#555555",
+        ).grid(row=5, column=2, sticky="w", padx=(6, 0), pady=2)
+
         self.verify_button = ttk.Button(
             form, text="Verify Case Integrity...", command=self._on_verify_clicked
         )
-        self.verify_button.grid(row=5, column=0, sticky="w", pady=(8, 0))
+        self.verify_button.grid(row=6, column=0, sticky="w", pady=(8, 0))
         self.run_button = ttk.Button(form, text="Run Analysis", command=self._on_run_clicked)
-        self.run_button.grid(row=5, column=1, columnspan=2, sticky="e", pady=(8, 0))
+        self.run_button.grid(row=6, column=1, columnspan=2, sticky="e", pady=(8, 0))
 
     def _build_progress_area(self, outer: ttk.Frame) -> None:
         middle = ttk.LabelFrame(outer, text="Progress", padding=8)
@@ -279,7 +290,13 @@ class ExfilTrackApp:
         self._clear_results()
         self._append_log("Starting a one-click collect-and-analyze run...")
         self._set_running(True)
-        self._worker = threading.Thread(target=self._run_quick_worker, daemon=True)
+        # Read the date field here, on the main thread: tkinter variables must
+        # never be touched from the worker thread.
+        self._worker = threading.Thread(
+            target=self._run_quick_worker,
+            kwargs={"events_since": self.since_var.get()},
+            daemon=True,
+        )
         self._worker.start()
 
     def _on_run_clicked(self) -> None:
@@ -296,6 +313,7 @@ class ExfilTrackApp:
                 "case_dir": self.case_dir_var.get(),
                 "case_id": self.case_id_var.get(),
                 "examiner": self.examiner_var.get(),
+                "events_since": self.since_var.get(),
             },
             daemon=True,
         )
@@ -346,7 +364,14 @@ class ExfilTrackApp:
     # ------------------------------------------------------------------
 
     def _run_analysis_worker(
-        self, *, mode: str, evidence_dir: str, case_dir: str, case_id: str, examiner: str
+        self,
+        *,
+        mode: str,
+        evidence_dir: str,
+        case_dir: str,
+        case_id: str,
+        examiner: str,
+        events_since: str,
     ) -> None:
         try:
             result = controller.run_analysis(
@@ -359,6 +384,7 @@ class ExfilTrackApp:
                 stage_progress=lambda stage, fraction: self._queue.put(
                     ("progress", (stage, fraction))
                 ),
+                events_since_text=events_since,
             )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
@@ -369,13 +395,14 @@ class ExfilTrackApp:
         finally:
             self._queue.put(("finished", ""))
 
-    def _run_quick_worker(self) -> None:
+    def _run_quick_worker(self, *, events_since: str) -> None:
         try:
             summary = controller.run_quick_analysis(
                 progress=lambda message: self._queue.put(("log", message)),
                 stage_progress=lambda stage, fraction: self._queue.put(
                     ("progress", (stage, fraction))
                 ),
+                events_since_text=events_since,
             )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))

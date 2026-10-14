@@ -37,6 +37,68 @@ def _install_one_artifact(monkeypatch: pytest.MonkeyPatch, evidence_dir: Path) -
     return evtx_path
 
 
+def _analyze_argv(evidence_dir: Path, case_dir: Path, *extra: str) -> list[str]:
+    return [
+        "analyze",
+        "--evidence",
+        str(evidence_dir),
+        "--case-dir",
+        str(case_dir),
+        "--case-id",
+        "CASE-SINCE",
+        "--examiner",
+        "J. Doe",
+        *extra,
+    ]
+
+
+@pytest.mark.unit
+def test_analyze_since_records_window_and_filters_nothing_when_later(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    _install_one_artifact(monkeypatch, evidence_dir)  # one event at WHEN (2026-03-01)
+    case_dir = tmp_path / "case"
+
+    code = main([*_analyze_argv(evidence_dir, case_dir), "--since", "2026-02-01"])
+
+    assert code == 0
+    payload = json.loads((case_dir / "case_manifest.json").read_text(encoding="utf-8"))
+    assert payload["analysis_window"]["since"] == "2026-02-01T00:00:00+00:00"
+    assert payload["analysis_window"]["excluded_events"] == 0
+
+
+@pytest.mark.unit
+def test_analyze_since_excludes_earlier_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    _install_one_artifact(monkeypatch, evidence_dir)  # one event at WHEN (2026-03-01)
+    case_dir = tmp_path / "case"
+
+    code = main([*_analyze_argv(evidence_dir, case_dir), "--since", "2026-04-01"])
+
+    assert code == 0
+    payload = json.loads((case_dir / "case_manifest.json").read_text(encoding="utf-8"))
+    assert payload["analysis_window"]["excluded_events"] == 1
+
+
+@pytest.mark.unit
+def test_analyze_since_rejects_bad_date(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    _install_one_artifact(monkeypatch, evidence_dir)
+
+    code = main([*_analyze_argv(evidence_dir, tmp_path / "case"), "--since", "15/02/2026"])
+
+    assert code == 1
+    assert "--since" in capsys.readouterr().err
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("help_flag", ["-h", "--help"])
 def test_top_level_help_includes_command_options_and_examples(

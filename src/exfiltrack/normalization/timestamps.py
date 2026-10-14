@@ -78,3 +78,24 @@ def parse_iso8601(timestamp_str: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"ISO-8601 timestamp has no UTC offset: {timestamp_str}")
     return parsed.astimezone(timezone.utc)
+
+
+def parse_utc_date(raw: str) -> datetime:
+    """Parse an analyst-supplied ``YYYY-MM-DD`` date as midnight UTC.
+
+    The timeline is UTC-normalized, so a bare calendar date means 00:00:00
+    UTC on that day. Used for the analysis-window cutoff (issue #68), e.g.
+    the date a laptop was handed to the employee under investigation.
+
+    Raises:
+        ValueError: If *raw* is not exactly ``YYYY-MM-DD`` or not a real
+            calendar date.
+    """
+    text = raw.strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        raise ValueError(f"Date must be YYYY-MM-DD, got {raw!r}.")
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"Not a real calendar date: {raw!r}.") from exc
+    return day.replace(tzinfo=timezone.utc)

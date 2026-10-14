@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -248,6 +248,7 @@ def run_pipeline(
     acquisition: dict[str, Any] | None = None,
     continue_on_parser_error: bool = False,
     progress: ProgressCallback | None = None,
+    events_since: datetime | None = None,
 ) -> PipelineResult:
     """Run the full ExfilTrack analysis pipeline for one case, start to finish.
 
@@ -292,6 +293,13 @@ def run_pipeline(
             stage), so front ends can show a real percentage (issue #65).
             Every reported fraction corresponds to completed work; nothing
             is fabricated.
+        events_since: Optional UTC-aware cutoff: events strictly before it
+            are excluded from the timeline before session reconstruction
+            (issue #68) -- e.g. only analyze the period since a laptop was
+            handed over. The cutoff and the excluded count are recorded in
+            the manifest so a scoped run can never be mistaken for a full
+            one. Evidence coverage (#34) still describes the unfiltered
+            evidence set.
 
     Returns:
         A :class:`PipelineResult` holding every intermediate and final
@@ -364,6 +372,24 @@ def run_pipeline(
     # and parser errors, so identical evidence yields identical coverage.
     coverage = build_coverage(artifacts, events, parser_errors=manifest.parser_errors)
     manifest.coverage = coverage.to_dict()
+
+    if events_since is not None:
+        if (
+            events_since.tzinfo is None
+            or events_since.utcoffset() is None
+            or events_since.utcoffset() != timedelta(0)
+        ):
+            raise PipelineError("events_since must be a timezone-aware UTC datetime.")
+        excluded = sum(1 for event in events if event.timestamp_utc < events_since)
+        events = [event for event in events if event.timestamp_utc >= events_since]
+        manifest.analysis_window = {
+            "since": events_since.isoformat(),
+            "excluded_events": excluded,
+        }
+        print(
+            f"Restricting analysis to events on/after {events_since.isoformat()} "
+            f"({excluded} earlier event(s) excluded)..."
+        )
 
     print(f"Normalizing and sorting {len(events)} events into timeline...")
     report("Normalizing the timeline", 0.70)
