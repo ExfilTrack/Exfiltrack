@@ -277,3 +277,71 @@ def test_acquisition_mismatch_is_refused_before_any_parsing(
 
     assert parsed == []
     assert not (tmp_path / "case").exists()
+
+
+@pytest.mark.unit
+def test_run_pipeline_reports_monotonic_stage_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The GUI's percentage bar rides on these fractions (issue #65)."""
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    evtx_path = evidence_dir / "System.evtx"
+    placeholder_evtx_file(evtx_path)
+    record = device_lifecycle_xml(
+        event_id="2003",
+        device_instance_id=r"USB\VID_1234&PID_5678\SERIAL001",
+        when=WHEN,
+        record_id=1,
+    )
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx",
+        SyntheticEvtxReader({evtx_path.resolve().as_posix(): [record]}),
+    )
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-PROG",
+        examiner="J. Doe",
+    )
+
+    calls: list[tuple[str, float]] = []
+    run_pipeline(config, progress=lambda stage, fraction: calls.append((stage, fraction)))
+
+    stages = [stage for stage, _ in calls]
+    fractions = [fraction for _, fraction in calls]
+    assert fractions[0] == 0.0
+    assert fractions[-1] == 1.0
+    assert fractions == sorted(fractions)  # monotonically non-decreasing
+    assert all(0.0 <= fraction <= 1.0 for fraction in fractions)
+    assert "Parsing 1/1" in stages
+    assert "Writing reports" in stages
+
+
+@pytest.mark.unit
+def test_run_pipeline_without_progress_callback_still_works(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The hook is optional: existing callers (the CLI) are unaffected."""
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    evtx_path = evidence_dir / "System.evtx"
+    placeholder_evtx_file(evtx_path)
+    record = device_lifecycle_xml(
+        event_id="2003",
+        device_instance_id=r"USB\VID_1234&PID_5678\SERIAL001",
+        when=WHEN,
+        record_id=1,
+    )
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx",
+        SyntheticEvtxReader({evtx_path.resolve().as_posix(): [record]}),
+    )
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-NOPROG",
+        examiner="J. Doe",
+    )
+    result = run_pipeline(config, write_reports=False)
+    assert len(result.events) == 1

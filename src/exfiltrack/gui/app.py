@@ -68,8 +68,10 @@ class ExfilTrackApp:
         self.case_dir_var = tk.StringVar()
         self.case_dir_label_var = tk.StringVar(value="Case output directory:")
         self.status_var = tk.StringVar(value="Idle.")
+        self.stage_var = tk.StringVar(value="")
         self.summary_var = tk.StringVar(value="No analysis run yet.")
         self.integrity_var = tk.StringVar(value="")
+        self.verdict_var = tk.StringVar(value="")
 
         self._build_widgets()
         self._on_mode_changed()
@@ -82,10 +84,11 @@ class ExfilTrackApp:
     def _build_widgets(self) -> None:
         outer = ttk.Frame(self.root, padding=10)
         outer.pack(fill=tk.BOTH, expand=True)
-        outer.rowconfigure(1, weight=1)
         outer.rowconfigure(2, weight=1)
+        outer.rowconfigure(3, weight=1)
         outer.columnconfigure(0, weight=1)
 
+        self._build_quick_actions(outer)
         self._build_case_form(outer)
         self._build_progress_area(outer)
         self._build_results_area(outer)
@@ -93,11 +96,33 @@ class ExfilTrackApp:
         footer = ttk.Label(
             outer, text=DISCLAIMER, foreground="#8a6d3b", wraplength=780, justify=tk.LEFT
         )
-        footer.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        footer.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+
+    def _build_quick_actions(self, outer: ttk.Frame) -> None:
+        quick = ttk.LabelFrame(outer, text="Quick triage", padding=8)
+        quick.grid(row=0, column=0, sticky="ew")
+        quick.columnconfigure(1, weight=1)
+        self.quick_button = ttk.Button(
+            quick,
+            text="One-Click Report (this machine)",
+            command=self._on_quick_clicked,
+        )
+        self.quick_button.grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            quick,
+            text=(
+                "Collects this machine's logs read-only, analyzes them, and opens the "
+                "report. Nothing to fill in. Run from an elevated terminal for full "
+                "coverage."
+            ),
+            foreground="#555555",
+            wraplength=560,
+            justify=tk.LEFT,
+        ).grid(row=0, column=1, sticky="w", padx=(10, 0))
 
     def _build_case_form(self, outer: ttk.Frame) -> None:
         form = ttk.LabelFrame(outer, text="Case", padding=8)
-        form.grid(row=0, column=0, sticky="ew")
+        form.grid(row=1, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
 
         ttk.Label(form, text="Case ID:").grid(row=0, column=0, sticky="w")
@@ -152,14 +177,20 @@ class ExfilTrackApp:
 
     def _build_progress_area(self, outer: ttk.Frame) -> None:
         middle = ttk.LabelFrame(outer, text="Progress", padding=8)
-        middle.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        middle.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
         middle.rowconfigure(1, weight=1)
         middle.columnconfigure(0, weight=1)
 
-        self.progress_bar = ttk.Progressbar(middle, mode="indeterminate")
+        # Determinate bar: the pipeline and the live collector report real
+        # per-stage fractions (issue #65), so the percentage is actual work
+        # done, never a fabricated pulse.
+        self.progress_bar = ttk.Progressbar(middle, mode="determinate", maximum=100.0)
         self.progress_bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(middle, textvariable=self.stage_var, width=34, anchor=tk.E).grid(
+            row=0, column=1, sticky="e", padx=(8, 0)
+        )
         ttk.Label(middle, textvariable=self.status_var).grid(
-            row=0, column=1, sticky="w", padx=(8, 0)
+            row=0, column=2, sticky="w", padx=(8, 0)
         )
         self.log = ScrolledText(middle, height=8, state=tk.DISABLED, wrap=tk.WORD)
         self.log.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
@@ -168,7 +199,7 @@ class ExfilTrackApp:
         results = ttk.LabelFrame(
             outer, text="Findings (double-click a row for the score breakdown)", padding=8
         )
-        results.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        results.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
         results.rowconfigure(0, weight=1)
         results.columnconfigure(0, weight=1)
 
@@ -196,9 +227,16 @@ class ExfilTrackApp:
         ttk.Label(results, textvariable=self.integrity_var).grid(
             row=2, column=0, columnspan=2, sticky="w"
         )
+        ttk.Label(
+            results,
+            textvariable=self.verdict_var,
+            foreground="#8a6d3b",
+            wraplength=760,
+            justify=tk.LEFT,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         actions = ttk.Frame(results)
-        actions.grid(row=3, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        actions.grid(row=4, column=0, columnspan=2, sticky="e", pady=(8, 0))
         self.open_html_button = ttk.Button(
             actions, text="Open HTML Report", command=self._on_open_html, state=tk.DISABLED
         )
@@ -223,6 +261,26 @@ class ExfilTrackApp:
         self.evidence_entry.configure(state=state)
         self.evidence_button.configure(state=state)
         self.case_dir_label_var.set("New case directory:" if live else "Case output directory:")
+
+    def _on_quick_clicked(self) -> None:
+        if self._worker is not None and self._worker.is_alive():
+            return
+        proceed = messagebox.askokcancel(
+            "One-Click Report",
+            "ExfilTrack will collect this machine's event logs, registry hives, and "
+            "recent-file artifacts (read-only; logging settings are never changed), "
+            "analyze them, and open the HTML report.\n\n"
+            "For full coverage, the terminal must be elevated (Run as administrator).\n\n"
+            "Continue?",
+            parent=self.root,
+        )
+        if not proceed:
+            return
+        self._clear_results()
+        self._append_log("Starting a one-click collect-and-analyze run...")
+        self._set_running(True)
+        self._worker = threading.Thread(target=self._run_quick_worker, daemon=True)
+        self._worker.start()
 
     def _on_run_clicked(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -298,6 +356,9 @@ class ExfilTrackApp:
                 case_id=case_id,
                 examiner=examiner,
                 progress=lambda message: self._queue.put(("log", message)),
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
             )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
@@ -308,9 +369,31 @@ class ExfilTrackApp:
         finally:
             self._queue.put(("finished", ""))
 
+    def _run_quick_worker(self) -> None:
+        try:
+            summary = controller.run_quick_analysis(
+                progress=lambda message: self._queue.put(("log", message)),
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
+            )
+        except (ExfilTrackError, OSError) as exc:
+            self._queue.put(("error", str(exc)))
+        except Exception as exc:  # unexpected; still no raw traceback for the analyst
+            self._queue.put(("error", f"Unexpected error: {exc}"))
+        else:
+            self._queue.put(("quick-result", summary))
+        finally:
+            self._queue.put(("finished", ""))
+
     def _run_verify_worker(self, case_dir: str) -> None:
         try:
-            summary = controller.verify_case(case_dir)
+            summary = controller.verify_case(
+                case_dir,
+                stage_progress=lambda stage, fraction: self._queue.put(
+                    ("progress", (stage, fraction))
+                ),
+            )
         except (ExfilTrackError, OSError) as exc:
             self._queue.put(("error", str(exc)))
         except Exception as exc:  # unexpected; still no raw traceback for the analyst
@@ -330,8 +413,13 @@ class ExfilTrackApp:
                 kind, payload = self._queue.get_nowait()
                 if kind == "log":
                     self._append_log(payload)
+                elif kind == "progress":
+                    self._on_progress(payload)
                 elif kind == "result":
                     self._show_summary(payload)
+                elif kind == "quick-result":
+                    self._show_summary(payload)
+                    self._open_report_after_quick(payload)
                 elif kind == "verify-result":
                     self._show_verification(payload)
                 elif kind == "error":
@@ -341,6 +429,14 @@ class ExfilTrackApp:
         except queue.Empty:
             pass
         self.root.after(_QUEUE_POLL_MS, self._poll_queue)
+
+    def _on_progress(self, payload: tuple[str, float]) -> None:
+        """Update the percentage bar from a (stage, fraction) worker message."""
+        stage, fraction = payload
+        percent = round(fraction * 100)
+        percent = max(0, min(100, percent))
+        self.progress_bar["value"] = percent
+        self.stage_var.set(f"{stage} ({percent}%)")
 
     def _show_summary(self, summary: AnalysisSummary) -> None:
         self._summary = summary
@@ -364,6 +460,7 @@ class ExfilTrackApp:
             + (f" ({counts})" if counts else "")
         )
         self.integrity_var.set(f"Evidence integrity: {summary.integrity_verdict}")
+        self.verdict_var.set(controller.detection_statement(summary))
         if summary.parser_errors:
             self._append_log(
                 f"WARNING: {len(summary.parser_errors)} artifact(s) could not be parsed; "
@@ -384,7 +481,15 @@ class ExfilTrackApp:
             self.open_html_button.configure(state=tk.NORMAL)
         if summary.output_dir.parts:
             self.open_folder_button.configure(state=tk.NORMAL)
+        self.progress_bar["value"] = 100
+        self.stage_var.set("Done (100%)")
         self.status_var.set("Analysis complete.")
+
+    def _open_report_after_quick(self, summary: AnalysisSummary) -> None:
+        """One-click runs finish by opening the HTML report, per issue #49."""
+        if summary.html_report is not None:
+            self._append_log(f"Opening the HTML report: {summary.html_report}")
+            _open_in_file_manager(summary.html_report)
 
     def _show_verification(self, summary: VerificationSummary) -> None:
         if summary.verified:
@@ -404,6 +509,8 @@ class ExfilTrackApp:
             messagebox.showwarning(
                 "Verify case", message + "\nSee the log pane for details.", parent=self.root
             )
+        self.progress_bar["value"] = 100
+        self.stage_var.set("Done (100%)")
         self.status_var.set("Verification complete.")
 
     def _show_error(self, message: str) -> None:
@@ -426,6 +533,7 @@ class ExfilTrackApp:
         self.findings.delete(*self.findings.get_children())
         self.summary_var.set("No analysis run yet.")
         self.integrity_var.set("")
+        self.verdict_var.set("")
         self.open_html_button.configure(state=tk.DISABLED)
         self.open_folder_button.configure(state=tk.DISABLED)
 
@@ -433,11 +541,12 @@ class ExfilTrackApp:
         state = tk.DISABLED if running else tk.NORMAL
         self.run_button.configure(state=state)
         self.verify_button.configure(state=state)
+        self.quick_button.configure(state=state)
         if running:
             self.status_var.set("Working...")
-            self.progress_bar.start(12)
-        else:
-            self.progress_bar.stop()
+            self.stage_var.set("")
+            self.progress_bar["value"] = 0
+        # When finished, the bar keeps its last value (100% on success).
 
 
 def main() -> int:

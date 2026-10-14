@@ -20,16 +20,19 @@ stays in the existing pipeline and configuration code.
 
 from __future__ import annotations
 
+import getpass
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from exfiltrack.config import CaseConfig, ConfigError, ExfilTrackError
+from exfiltrack.correlation.confidence import ConfidenceLevel
 from exfiltrack.evidence.hashing import DigestMismatchError, verify_digest
 from exfiltrack.evidence.live import collect_live_evidence
-from exfiltrack.evidence.manifest import MANIFEST_FILENAME
+from exfiltrack.evidence.manifest import MANIFEST_FILENAME, utc_now
 from exfiltrack.pipeline import PipelineResult, run_pipeline
 from exfiltrack.reporting.model import Finding
 
@@ -42,6 +45,10 @@ ANALYSIS_MODES = (OFFLINE_MODE, LIVE_MODE)
 _GAP_STATUSES = frozenset({"missing", "unavailable", "error"})
 
 ProgressCallback = Callable[[str], None]
+
+# (stage label, fraction complete in [0.0, 1.0]) for the GUI's determinate
+# progress bar (issue #65). Fractions are monotonically non-decreasing.
+StageProgressCallback = Callable[[str, float], None]
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +228,7 @@ def run_analysis(
     case_id: str,
     examiner: str,
     progress: ProgressCallback | None = None,
+    stage_progress: StageProgressCallback | None = None,
 ) -> PipelineResult:
     """Run the pipeline for the GUI, mirroring the CLI's ``analyze`` command.
 
@@ -233,6 +241,10 @@ def run_analysis(
         case_id, examiner: Recorded in the chain-of-custody manifest.
         progress: Optional callback invoked with one-line status messages so
             the front end can show what stage the run is at.
+        stage_progress: Optional (stage, fraction) callback for the
+            percentage bar (issue #65). Offline runs forward the pipeline's
+            own fractions unchanged; live runs scale collection into 0-50%
+            and the analysis pipeline into 50-100%.
 
     Raises:
         ConfigError: For invalid form input or an unknown mode.
@@ -241,6 +253,9 @@ def run_analysis(
             messages, never raw tracebacks.
     """
     report = progress if progress is not None else (lambda _message: None)
+    report_stage = (
+        stage_progress if stage_progress is not None else (lambda _stage, _fraction: None)
+    )
     if mode == OFFLINE_MODE:
         config = build_offline_config(
             evidence_dir=evidence_dir,
@@ -249,11 +264,16 @@ def run_analysis(
             examiner=examiner,
         )
         report("Running the analysis pipeline; evidence is opened read-only...")
-        return run_pipeline(config, continue_on_parser_error=True)
+        return run_pipeline(config, continue_on_parser_error=True, progress=report_stage)
     if mode == LIVE_MODE:
         target = validate_live_case_dir(case_dir)
         report("Collecting artifacts from this machine (read-only; no logging is changed)...")
-        acquisition = collect_live_evidence(target, case_id=case_id, examiner=examiner)
+        acquisition = collect_live_evidence(
+            target,
+            case_id=case_id,
+            examiner=examiner,
+            progress=lambda label, fraction: report_stage(f"Collecting: {label}", 0.5 * fraction),
+        )
         report(f"Collection coverage: {acquisition.manifest['coverage']}")
         for line in collection_gap_lines(acquisition.manifest):
             report(f"  gap: {line}")
@@ -268,6 +288,7 @@ def run_analysis(
             config,
             acquisition=acquisition.manifest,
             continue_on_parser_error=True,
+            progress=lambda stage, fraction: report_stage(stage, 0.5 + 0.5 * fraction),
         )
     raise ConfigError(f"Unknown analysis mode: {mode!r}.")
 
@@ -336,13 +357,18 @@ def summarize_result(result: PipelineResult) -> AnalysisSummary:
 # ---------------------------------------------------------------------------
 
 
-def verify_case(case_dir: str | Path) -> VerificationSummary:
+def verify_case(
+    case_dir: str | Path, *, stage_progress: StageProgressCallback | None = None
+) -> VerificationSummary:
     """Re-check a case's recorded evidence digests without re-running analysis.
 
     Equivalent to ``exfiltrack verify --case-dir``: reads the manifest,
     resolves each recorded relative path against the recorded evidence
     directory, and recomputes SHA-256 digests. For a live-acquisition case
     the case directory itself is accepted; its ``reports/`` folder is used.
+
+    ``stage_progress``, when given, is called per artifact with the fraction
+    of digests checked so far (issue #65).
 
     Raises:
         ExfilTrackError: If the directory has no manifest, the manifest is
@@ -371,16 +397,157 @@ def verify_case(case_dir: str | Path) -> VerificationSummary:
         raise ExfilTrackError(f"'{manifest_path}' records no evidence directory to verify against.")
     evidence_dir = Path(evidence_value)
 
+    report_stage = (
+        stage_progress if stage_progress is not None else (lambda _stage, _fraction: None)
+    )
+    total = len(digests)
     failures: list[str] = []
-    for record in digests:
+    for index, record in enumerate(digests, 1):
         target = evidence_dir / record["path"]
         try:
             verify_digest(target, record["digest"])
         except (DigestMismatchError, OSError) as exc:
             failures.append(f"{record['path']}: {exc}")
+        report_stage("Verifying recorded digests", index / total)
     return VerificationSummary(
         manifest_path=manifest_path,
         evidence_dir=evidence_dir,
         total=len(digests),
         failures=tuple(failures),
+    )
+
+
+# ---------------------------------------------------------------------------
+# One-click analysis (issue #49)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class QuickCaseSetup:
+    """Auto-generated case metadata for a one-click run.
+
+    Attributes:
+        case_id: ``AUTO-<UTC timestamp>`` so runs sort chronologically and a
+            human can tell them apart. Matches the case directory name.
+        examiner: The logged-on user, or ``"unknown"`` if it cannot be
+            determined; the analyst can still edit the manifest later, but a
+            one-click run must never block on a form field.
+        case_dir: Fresh directory the live collector will create.
+    """
+
+    case_id: str
+    examiner: str
+    case_dir: Path
+
+
+def prepare_quick_case(
+    base_dir: Path | None = None,
+    *,
+    now: datetime | None = None,
+    user: str | None = None,
+) -> QuickCaseSetup:
+    """Generate the metadata a one-click run needs, with no form fields at all.
+
+    Parameters:
+        base_dir: Parent for the new case directory. Defaults to
+            ``~/ExfilTrackCases``. Injected by tests.
+        now: Timestamp used for the case ID; defaults to the current UTC
+            time. Injected by tests for determinism.
+        user: Examiner name; defaults to the logged-on user.
+
+    The case ID doubles as the case directory name, and an existing
+    directory bumps a numeric suffix, so the collector's "must not already
+    exist" rule holds without the analyst doing anything.
+    """
+    stamp = now if now is not None else utc_now()
+    base_id = f"AUTO-{stamp:%Y%m%d-%H%M%S}"
+    if user is not None:
+        examiner = user
+    else:
+        try:
+            examiner = getpass.getuser()
+        except (KeyError, OSError):
+            examiner = ""
+        if not examiner.strip():
+            examiner = "unknown"
+    root = base_dir if base_dir is not None else Path.home() / "ExfilTrackCases"
+    case_id = base_id
+    case_dir = root / case_id
+    suffix = 2
+    while case_dir.exists():
+        case_id = f"{base_id}-{suffix}"
+        case_dir = root / case_id
+        suffix += 1
+    return QuickCaseSetup(case_id=case_id, examiner=examiner, case_dir=case_dir)
+
+
+def run_quick_analysis(
+    *,
+    progress: ProgressCallback | None = None,
+    base_dir: Path | None = None,
+    stage_progress: StageProgressCallback | None = None,
+) -> AnalysisSummary:
+    """One-click triage: collect from this machine, analyze, and summarize.
+
+    The pipeline invocation is identical to a ``LIVE_MODE``
+    :func:`run_analysis` call (same collector, same arguments); the only
+    difference is that every form field is generated automatically.
+
+    Parameters:
+        progress: Optional callback for one-line status messages.
+        base_dir: Forwarded to :func:`prepare_quick_case`; tests use it to
+            keep cases inside a temporary directory.
+    """
+    report = progress if progress is not None else (lambda _message: None)
+    setup = prepare_quick_case(base_dir)
+    report(f"One-click case {setup.case_id} (examiner {setup.examiner}).")
+    report(f"Case directory: {setup.case_dir}")
+    result = run_analysis(
+        mode=LIVE_MODE,
+        evidence_dir="",
+        case_dir=str(setup.case_dir),
+        case_id=setup.case_id,
+        examiner=setup.examiner,
+        progress=progress,
+        stage_progress=stage_progress,
+    )
+    return summarize_result(result)
+
+
+def detection_statement(summary: AnalysisSummary) -> str:
+    """Answer "was anything copied to USB?" in one carefully worded sentence.
+
+    Wording follows the project rule: activity is only ever "consistent with
+    possible" exfiltration, ``Confirmed`` is reserved for cryptographic hash
+    matches, and an empty result names evidence coverage rather than reading
+    as an exoneration (the failure mode issue #34 warns about).
+    """
+    levels = dict(summary.confidence_counts)
+    confirmed = levels.get(str(ConfidenceLevel.CONFIRMED), 0)
+    high = levels.get(str(ConfidenceLevel.HIGH), 0)
+    medium = levels.get(str(ConfidenceLevel.MEDIUM), 0)
+    total = len(summary.findings)
+    if total == 0:
+        return (
+            "No USB sessions were reconstructed from the available evidence. This does "
+            "not establish that no copying occurred - see the report's Evidence Coverage "
+            "section for sources that were absent or empty."
+        )
+    if confirmed:
+        return (
+            f"{confirmed} of {total} session(s) include a cryptographic hash match to a "
+            "file on the destination USB (Confirmed): those files were demonstrably "
+            "present on the destination device."
+        )
+    if high + medium:
+        return (
+            f"{high + medium} of {total} reconstructed USB session(s) show activity "
+            f"consistent with possible exfiltration (confidence Medium or higher: "
+            f"{high} High, {medium} Medium). Temporal correlation alone does not prove "
+            "that a file was copied - review the score breakdowns before acting."
+        )
+    return (
+        f"{total} USB session(s) reconstructed; none rose above Low confidence. No "
+        "activity consistent with possible exfiltration stands out in the available "
+        "evidence."
     )
