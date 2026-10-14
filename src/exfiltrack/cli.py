@@ -31,6 +31,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
 from exfiltrack import __tool_name__, __version__
@@ -38,6 +39,7 @@ from exfiltrack.config import CaseConfig, ExfilTrackError
 from exfiltrack.evidence.hashing import DigestMismatchError, verify_digest
 from exfiltrack.evidence.live import collect_live_evidence
 from exfiltrack.evidence.manifest import MANIFEST_FILENAME
+from exfiltrack.normalization.timestamps import parse_utc_date
 from exfiltrack.pipeline import PipelineResult, run_pipeline
 
 _EXIT_OK = 0
@@ -86,6 +88,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     analyze.add_argument(
         "--examiner", required=True, help="Full name or badge ID of the analyst running the tool."
     )
+    analyze.add_argument(
+        "--since",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help=(
+            "Only analyze events on/after this date (UTC), e.g. the date the laptop "
+            "was handed to the employee. The cutoff and the number of excluded "
+            "events are recorded in the case manifest and report."
+        ),
+    )
 
     verify = subparsers.add_parser(
         "verify", help="Re-check evidence digests recorded in a previously written case manifest."
@@ -119,6 +131,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _events_since(args: argparse.Namespace) -> datetime | None:
+    """Parse the optional ``--since`` cutoff (issue #68) into a UTC datetime."""
+    if not args.since:
+        return None
+    try:
+        return parse_utc_date(args.since)
+    except ValueError as exc:
+        raise ExfilTrackError(f"--since: {exc}") from exc
+
+
 def _run_analyze(args: argparse.Namespace) -> int:
     if args.auto:
         return _run_auto(args)
@@ -128,7 +150,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
         case_id=args.case_id,
         examiner=args.examiner,
     )
-    result = run_pipeline(config, continue_on_parser_error=True)
+    result = run_pipeline(config, continue_on_parser_error=True, events_since=_events_since(args))
     _print_analyze_summary(result)
     return _EXIT_OK
 
@@ -166,6 +188,7 @@ def _run_auto(args: argparse.Namespace) -> int:
         config,
         acquisition=acquisition.manifest,
         continue_on_parser_error=True,
+        events_since=_events_since(args),
     )
     _print_analyze_summary(result)
     return _EXIT_OK
