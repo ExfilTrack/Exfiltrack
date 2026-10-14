@@ -337,3 +337,51 @@ def test_pipeline_still_sessions_from_registry_boundaries_when_channel_off(
     [session] = result.sessions
     assert session.boundary_sources == ("registry_properties", "registry_properties")
     assert session.partial_coverage  # the #35 marker still fires
+
+
+@pytest.mark.unit
+def test_json_finding_lists_reported_device_ids() -> None:
+    """The canonical id leads; the raw WPD spelling stays cited (#70)."""
+    from exfiltrack.correlation.sessions import reconstruct_sessions
+    from exfiltrack.evidence.manifest import CaseManifest
+    from exfiltrack.reporting.json_report import build_json_report
+    from exfiltrack.reporting.model import assemble_findings
+
+    events = resolve_device_identities(
+        [
+            make_insert_event(BASE, _wpd_device(), source_artifact="evidence/evtx/dfu.evtx"),
+            make_remove_event(
+                BASE + timedelta(minutes=10),
+                _wpd_device(),
+                source_artifact="evidence/evtx/dfu.evtx",
+            ),
+        ]
+    )
+    [finding] = assemble_findings(reconstruct_sessions(events))
+    manifest = CaseManifest(
+        case_id="CASE-70", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0)
+    )
+
+    device = build_json_report([finding], manifest)["findings"][0]["device"]
+    assert device["device_id"] == KINGSTON_CANONICAL
+    assert device["reported_device_ids"] == [KINGSTON_WPD]
+    assert device["product"] == "DATATRAVELER_3.0"  # derived from the id itself
+
+
+@pytest.mark.unit
+def test_json_finding_has_empty_reported_ids_when_already_canonical() -> None:
+    from exfiltrack.correlation.sessions import reconstruct_sessions
+    from exfiltrack.evidence.manifest import CaseManifest
+    from exfiltrack.reporting.json_report import build_json_report
+    from exfiltrack.reporting.model import assemble_findings
+
+    events = [
+        make_insert_event(BASE, make_device()),
+        make_remove_event(BASE + timedelta(minutes=10), make_device()),
+    ]
+    [finding] = assemble_findings(reconstruct_sessions(events))
+    manifest = CaseManifest(
+        case_id="CASE-70", examiner="J. Doe", start_time=utc(2026, 1, 1, 8, 0, 0)
+    )
+    device = build_json_report([finding], manifest)["findings"][0]["device"]
+    assert device["reported_device_ids"] == []
