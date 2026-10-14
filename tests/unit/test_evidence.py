@@ -247,6 +247,43 @@ def test_discover_artifacts_raises_on_truncated_artifact(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
+def test_lenient_discovery_records_a_zero_filled_lnk_instead_of_raising(tmp_path: Path) -> None:
+    """Live Recent folders contain some corrupt shortcuts; one must not abort the run."""
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    corrupt = evidence / "microsoft-edge&url=https%3A%2F%2Fexample.com.lnk"
+    corrupt.write_bytes(b"\x00" * 64)
+    (evidence / "Security.evtx").write_bytes(EVTX_HEADER)
+
+    records = {r.path.name: r for r in discover_artifacts(evidence, strict=False)}
+
+    bad = records[corrupt.name]
+    assert bad.artifact_type is ArtifactType.LNK
+    assert bad.intake_error is not None and "truncated or malformed" in bad.intake_error
+    assert bad.intake_digest == hash_file(corrupt)  # still hashed into the manifest
+    assert records["Security.evtx"].intake_error is None
+    with pytest.raises(ArtifactError, match="truncated or malformed"):
+        discover_artifacts(evidence)  # strict stays the default
+
+
+@pytest.mark.unit
+def test_lenient_discovery_still_raises_on_unreadable_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "Recent.lnk").write_bytes(LNK_HEADER)
+
+    def deny(*_args: object, **_kwargs: object) -> bytes:
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr("exfiltrack.evidence.intake._read_header", deny)
+
+    with pytest.raises(ArtifactError, match="Cannot read evidence file"):
+        discover_artifacts(evidence, strict=False)
+
+
+@pytest.mark.unit
 def test_discover_artifacts_raises_on_empty_jump_list(tmp_path: Path) -> None:
     evidence = tmp_path / "evidence"
     evidence.mkdir()

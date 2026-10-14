@@ -322,7 +322,9 @@ def run_pipeline(
     evidence_dir = config.resolved_evidence_dir
     print("Discovering artifacts...")
     report("Discovering artifacts", 0.0)
-    artifacts = discover_artifacts(evidence_dir)
+    # Lenient intake whenever the run continues past failures: one corrupt file
+    # in a live Recent folder must not abort analysis of everything else.
+    artifacts = discover_artifacts(evidence_dir, strict=not continue_on_parser_error)
     if not artifacts:
         raise PipelineError(f"No evidence artifacts found under '{evidence_dir}'.")
 
@@ -348,6 +350,20 @@ def run_pipeline(
         # Parsing dominates runtime, so it carries the largest share.
         report(f"Parsing {i}/{total_artifacts}", 0.10 + 0.60 * (i - 1) / total_artifacts)
         key = (module.PARSER_NAME, module.PARSER_VERSION)
+        if artifact.intake_error is not None:
+            # Header contradicts the file name (e.g. a zero-filled .lnk). Never
+            # hand it to the parser; report it like any other unparsable file.
+            manifest.parser_errors.append(
+                {
+                    "source_artifact": artifact.path.as_posix(),
+                    "artifact_type": artifact.artifact_type.value,
+                    "parser_name": key[0],
+                    "parser_version": key[1],
+                    "error_type": "ArtifactError",
+                    "message": artifact.intake_error,
+                }
+            )
+            continue
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
         try:
             # Fully consumed before extending, so a parser that fails midway

@@ -295,6 +295,7 @@ def _install_fake_collector(
     tamper_after_collection: bool = False,
     extra_records: tuple[dict[str, Any], ...] = (),
     broken_artifact: bool = False,
+    zero_filled_lnk: bool = False,
 ) -> list[dict[str, Any]]:
     """Replace live collection with a fake that lays out a real fresh case.
 
@@ -338,6 +339,22 @@ def _install_fake_collector(
                     "source": "Security",
                     "destination": "evtx/Security.evtx",
                     "sha256": hash_file(broken),
+                }
+            )
+        if zero_filled_lnk:
+            # Live Recent folders contain shortcuts like this one: named .lnk,
+            # but the content is all zeros.
+            lnk = evidence_dir / "users" / "S-1-5-21-1" / "Recent" / "microsoft-edge&url=x.lnk"
+            lnk.parent.mkdir(parents=True)
+            lnk.write_bytes(b"\x00" * 64)
+            records.append(
+                {
+                    **records[0],
+                    "category": "lnk",
+                    "source": str(lnk.name),
+                    "method": "read-only copy",
+                    "destination": lnk.relative_to(evidence_dir).as_posix(),
+                    "sha256": hash_file(lnk),
                 }
             )
         manifest = {
@@ -458,6 +475,59 @@ def test_auto_records_parser_failures_and_continues(
     assert error["error_type"] == "EvtxParseError"
     html = (case_dir / "reports" / "report.html").read_text(encoding="utf-8")
     assert "Partial analysis" in html
+
+
+@pytest.mark.unit
+def test_auto_reports_a_zero_filled_shortcut_instead_of_aborting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: one corrupt Recent .lnk used to abort the whole auto run."""
+    case_dir = tmp_path / "case"
+    _install_fake_collector(monkeypatch, case_dir, zero_filled_lnk=True)
+
+    exit_code = main(_auto_args(case_dir))
+
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+    assert "could not be parsed; results are PARTIAL" in captured.out
+    assert "microsoft-edge&url=x.lnk" in captured.out
+    assert "Evidence integrity: verified" in captured.out
+    manifest = json.loads((case_dir / "reports" / "case_manifest.json").read_text(encoding="utf-8"))
+    [error] = manifest["parser_errors"]
+    assert error["error_type"] == "ArtifactError"
+    assert error["artifact_type"] == "lnk_shortcut"
+    assert "truncated or malformed" in error["message"]
+    # The remaining evidence was still analyzed.
+    assert any(r["path"] == "evtx/System.evtx" for r in manifest["intake_digests"])
+    assert any(r["path"].endswith("x.lnk") for r in manifest["intake_digests"])
+
+
+@pytest.mark.unit
+def test_manual_analyze_also_continues_past_a_corrupt_shortcut(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    _install_one_artifact(monkeypatch, evidence_dir)
+    (evidence_dir / "broken.lnk").write_bytes(b"\x00" * 64)
+
+    exit_code = main(
+        [
+            "analyze",
+            "--evidence",
+            str(evidence_dir),
+            "--case-dir",
+            str(tmp_path / "case"),
+            "--case-id",
+            "CASE-CLI-9",
+            "--examiner",
+            "Tester",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+    assert "broken.lnk" in captured.out and "PARTIAL" in captured.out
 
 
 @pytest.mark.unit
