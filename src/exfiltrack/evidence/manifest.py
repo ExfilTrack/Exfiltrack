@@ -161,6 +161,10 @@ class CaseManifest:
         :func:`exfiltrack.reporting.coverage.build_coverage`; ``None`` only
         for manifests constructed outside the pipeline (e.g. report unit
         tests).
+    analysis_window:
+        The analysis-window cutoff (issue #68): ``{"since": <ISO-8601 UTC>,
+        "excluded_events": <int>}`` when the run was restricted to events
+        on/after a date; ``None`` for unrestricted runs.
     """
 
     case_id: str
@@ -177,6 +181,7 @@ class CaseManifest:
     acquisition: dict[str, Any] | None = None
     parser_errors: list[dict[str, str]] = field(default_factory=list)
     coverage: dict[str, Any] | None = None
+    analysis_window: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self._require_utc("start_time", self.start_time)
@@ -233,6 +238,8 @@ class CaseManifest:
             payload["parser_errors"] = [dict(error) for error in self.parser_errors]
         if self.coverage is not None:
             payload["coverage"] = self.coverage
+        if self.analysis_window is not None:
+            payload["analysis_window"] = dict(self.analysis_window)
         return payload
 
 

@@ -9,7 +9,7 @@ since they exercise the pipeline end to end rather than one seam at a time.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -345,3 +345,133 @@ def test_run_pipeline_without_progress_callback_still_works(
     )
     result = run_pipeline(config, write_reports=False)
     assert len(result.events) == 1
+
+
+# ---------------------------------------------------------------------------
+# Analysis window (issue #68)
+# ---------------------------------------------------------------------------
+
+_OLD = datetime(2026, 1, 10, 9, 0, 0, tzinfo=timezone.utc)
+_CUTOFF = datetime(2026, 2, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _window_scenario(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[CaseConfig, dict[str, list[str]]]:
+    """One pre-cutoff insert and one post-cutoff insert/remove pair."""
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    sys_log = evidence_dir / "System.evtx"
+    placeholder_evtx_file(sys_log)
+    records = {
+        sys_log.resolve().as_posix(): [
+            device_lifecycle_xml(
+                event_id="2003",
+                device_instance_id=r"USB\VID_1234&PID_5678\OLDSTICK",
+                when=_OLD,
+                record_id=1,
+            ),
+            device_lifecycle_xml(
+                event_id="2003",
+                device_instance_id=r"USB\VID_1234&PID_5678\NEWSTICK",
+                when=WHEN,
+                record_id=2,
+            ),
+            device_lifecycle_xml(
+                event_id="2102",
+                device_instance_id=r"USB\VID_1234&PID_5678\NEWSTICK",
+                when=WHEN + timedelta(minutes=5),
+                record_id=3,
+            ),
+        ]
+    }
+    monkeypatch.setattr("exfiltrack.parsers.evtx_parser.evtx.Evtx", SyntheticEvtxReader(records))
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-WINDOW",
+        examiner="J. Doe",
+    )
+    return config, records
+
+
+@pytest.mark.unit
+def test_events_since_filters_timeline_and_records_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config, _records = _window_scenario(monkeypatch, tmp_path)
+    result = run_pipeline(config, events_since=_CUTOFF)
+
+    assert len(result.events) == 2
+    assert all(event.timestamp_utc >= _CUTOFF for event in result.events)
+    assert result.manifest.analysis_window == {
+        "since": _CUTOFF.isoformat(),
+        "excluded_events": 1,
+    }
+    assert len(result.sessions) == 1
+    assert result.sessions[0].boundary_sources == ("event_log", "event_log")
+
+    payload = json.loads(result.report_paths["manifest"].read_text(encoding="utf-8"))
+    assert payload["analysis_window"]["since"] == _CUTOFF.isoformat()
+    assert payload["analysis_window"]["excluded_events"] == 1
+    html = result.report_paths["html"].read_text(encoding="utf-8")
+    assert "Analysis window" in html
+    assert _CUTOFF.isoformat() in html
+
+
+@pytest.mark.unit
+def test_events_since_straddling_session_reconstructs_as_orphan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Insert before the cutoff + removal after it: the start is inferred and
+    the #35 partial-coverage marker discloses it."""
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    sys_log = evidence_dir / "System.evtx"
+    placeholder_evtx_file(sys_log)
+    device = r"USB\VID_1234&PID_5678\STRADDLE"
+    records = {
+        sys_log.resolve().as_posix(): [
+            device_lifecycle_xml(
+                event_id="2003", device_instance_id=device, when=_OLD, record_id=1
+            ),
+            device_lifecycle_xml(
+                event_id="2102",
+                device_instance_id=device,
+                when=WHEN + timedelta(minutes=5),
+                record_id=2,
+            ),
+        ]
+    }
+    monkeypatch.setattr("exfiltrack.parsers.evtx_parser.evtx.Evtx", SyntheticEvtxReader(records))
+    config = CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-STRADDLE",
+        examiner="J. Doe",
+    )
+    result = run_pipeline(config, events_since=_CUTOFF, write_reports=False)
+
+    [session] = result.sessions
+    assert session.boundary_sources == ("inferred", "event_log")
+    assert session.partial_coverage
+
+
+@pytest.mark.unit
+def test_events_since_rejects_naive_datetime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config, _records = _window_scenario(monkeypatch, tmp_path)
+    with pytest.raises(PipelineError, match="timezone-aware UTC"):
+        run_pipeline(config, events_since=datetime(2026, 2, 1), write_reports=False)
+
+
+@pytest.mark.unit
+def test_without_window_the_manifest_has_no_window_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config, _records = _window_scenario(monkeypatch, tmp_path)
+    result = run_pipeline(config)
+    payload = json.loads(result.report_paths["manifest"].read_text(encoding="utf-8"))
+    assert "analysis_window" not in payload
+    assert len(result.events) == 3

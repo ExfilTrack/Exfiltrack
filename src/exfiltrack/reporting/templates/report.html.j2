@@ -418,6 +418,16 @@
             <th>Run ended</th>
             <td class="mono">{% if manifest.end_time %}{{ manifest.end_time | fmt_ts }}{% else %}in progress{% endif %}</td>
           </tr>
+          {% if manifest.analysis_window is defined and manifest.analysis_window is not none %}
+            <tr>
+              <th>Analysis window</th>
+              <td>
+                Only events on/after <span class="mono">{{ manifest.analysis_window.since }}</span>
+                were analyzed; {{ manifest.analysis_window.excluded_events }} earlier event(s)
+                were excluded by the configured cutoff (issue #68).
+              </td>
+            </tr>
+          {% endif %}
           <tr>
             <th>Integrity verdict</th>
             <td><span class="badge badge-verdict-{{ manifest.integrity_verdict.value }}">{{ manifest.integrity_verdict.value }}</span></td>
