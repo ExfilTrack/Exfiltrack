@@ -11,7 +11,7 @@ skip cleanly when tkinter or a display is unavailable.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -496,5 +496,184 @@ def test_app_show_error_uses_dialog_not_traceback(monkeypatch: pytest.MonkeyPatc
         window._show_error("Evidence directory 'X' does not exist.")
         assert shown and "does not exist" in shown[0][0][1]
         assert window.status_var.get() == "Failed."
+    finally:
+        root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# One-click analysis (issue #49)
+# ---------------------------------------------------------------------------
+
+
+def _summary_for_findings(
+    tmp_path: Path, findings: tuple[Any, ...], events: tuple[Any, ...] = ()
+) -> controller.AnalysisSummary:
+    config = _case_config(tmp_path)
+    manifest = CaseManifest.from_config(config, [], start_time=utc(2026, 3, 1, 10, 0, 0))
+    manifest.integrity_verdict = IntegrityVerdict.VERIFIED
+    return controller.summarize_result(
+        PipelineResult(
+            manifest=manifest,
+            artifacts=(),
+            events=events,
+            sessions=(),
+            findings=findings,
+        )
+    )
+
+
+@pytest.mark.unit
+def test_prepare_quick_case_generates_complete_defaults(tmp_path: Path) -> None:
+    setup = controller.prepare_quick_case(
+        tmp_path, now=datetime(2026, 10, 8, 12, 34, 56, tzinfo=timezone.utc), user="analyst"
+    )
+    assert setup.case_id == "AUTO-20261008-123456"
+    assert setup.examiner == "analyst"
+    assert setup.case_dir == tmp_path / "AUTO-20261008-123456"
+
+
+@pytest.mark.unit
+def test_prepare_quick_case_bumps_suffix_when_directory_exists(tmp_path: Path) -> None:
+    (tmp_path / "AUTO-20261008-123456").mkdir()
+    setup = controller.prepare_quick_case(
+        tmp_path, now=datetime(2026, 10, 8, 12, 34, 56, tzinfo=timezone.utc), user="analyst"
+    )
+    assert setup.case_id == "AUTO-20261008-123456-2"
+    assert not setup.case_dir.exists()  # still fresh for the collector to create
+
+
+@pytest.mark.unit
+def test_prepare_quick_case_defaults_examiner_to_logged_on_user(tmp_path: Path) -> None:
+    setup = controller.prepare_quick_case(tmp_path)
+    assert setup.examiner.strip()
+    assert setup.case_dir.parent == tmp_path
+    assert setup.case_id.startswith("AUTO-")
+
+
+@pytest.mark.unit
+def test_run_quick_analysis_uses_live_mode_with_generated_case(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_analysis(**kwargs: Any) -> PipelineResult:
+        captured.update(kwargs)
+        return _result_with_one_finding(_case_config(tmp_path), tmp_path)
+
+    monkeypatch.setattr(controller, "run_analysis", fake_run_analysis)
+    messages: list[str] = []
+    summary = controller.run_quick_analysis(progress=messages.append, base_dir=tmp_path / "cases")
+
+    assert captured["mode"] == controller.LIVE_MODE
+    assert captured["case_id"].startswith("AUTO-")
+    assert Path(captured["case_dir"]).parent == tmp_path / "cases"
+    assert captured["case_id"] in captured["case_dir"]
+    assert captured["examiner"].strip()
+    assert len(summary.findings) == 1
+    assert any("One-click case" in message for message in messages)
+
+
+@pytest.mark.unit
+def test_detection_statement_when_no_sessions(tmp_path: Path) -> None:
+    statement = controller.detection_statement(_summary_for_findings(tmp_path, ()))
+    assert "No USB sessions were reconstructed" in statement
+    assert "Evidence Coverage" in statement
+
+
+@pytest.mark.unit
+def test_detection_statement_for_low_only_findings(tmp_path: Path) -> None:
+    device = make_device()
+    base = utc(2026, 3, 1, 9, 0, 0)
+    events = [
+        make_insert_event(base, device),
+        make_file_event(base + timedelta(minutes=2), r"E:\Docs\notes.txt"),
+        make_remove_event(base + timedelta(minutes=10), device),
+    ]
+    findings = tuple(assemble_findings(reconstruct_sessions(events)))
+    [finding] = findings
+    assert str(finding.confidence.level) == "Low"  # sanity: the fixture is a Low session
+    statement = controller.detection_statement(
+        _summary_for_findings(tmp_path, findings, tuple(events))
+    )
+    assert "none rose above Low" in statement
+
+
+@pytest.mark.unit
+def test_detection_statement_for_high_findings(tmp_path: Path) -> None:
+    summary = controller.summarize_result(
+        _result_with_one_finding(_case_config(tmp_path), tmp_path)
+    )
+    statement = controller.detection_statement(summary)
+    assert "consistent with possible exfiltration" in statement
+    assert "1 High, 0 Medium" in statement
+    assert "does not prove that a file was copied" in statement
+
+
+@pytest.mark.unit
+def test_detection_statement_for_confirmed_hash_match(tmp_path: Path) -> None:
+    device = make_device()
+    base = utc(2026, 3, 1, 9, 0, 0)
+    digest = "ab" * 32
+    events = [
+        make_insert_event(base, device),
+        make_file_event(base + timedelta(seconds=5), r"E:\Confidential\db_dump.sql", sha256=digest),
+        make_remove_event(base + timedelta(minutes=10), device),
+    ]
+    findings = tuple(
+        assemble_findings(reconstruct_sessions(events), destination_file_hashes=frozenset({digest}))
+    )
+    [finding] = findings
+    assert str(finding.confidence.level) == "Confirmed"  # sanity
+    statement = controller.detection_statement(
+        _summary_for_findings(tmp_path, findings, tuple(events))
+    )
+    assert "hash match" in statement
+    assert "demonstrably present on the destination device" in statement
+
+
+@pytest.mark.unit
+def test_app_one_click_button_runs_and_opens_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pytest.importorskip("tkinter")
+    from exfiltrack.gui import app as gui_app
+
+    summary = controller.summarize_result(
+        _result_with_one_finding(_case_config(tmp_path), tmp_path)
+    )
+    monkeypatch.setattr(gui_app.controller, "run_quick_analysis", lambda **kwargs: summary)
+    monkeypatch.setattr(gui_app.messagebox, "askokcancel", lambda *a, **k: True)
+    opened: list[Path] = []
+    monkeypatch.setattr(gui_app, "_open_in_file_manager", lambda path: opened.append(path))
+    root, window = _build_app_or_skip()
+    try:
+        window.quick_button.invoke()
+        assert window._worker is not None
+        window._worker.join(timeout=10)
+        window._poll_queue()  # drain queued messages without running the mainloop
+        assert len(window.findings.get_children()) == 1
+        assert "consistent with possible exfiltration" in window.verdict_var.get()
+        assert opened == [summary.html_report]
+        assert str(window.quick_button.cget("state")) == "normal"  # re-enabled at the end
+    finally:
+        root.destroy()
+
+
+@pytest.mark.unit
+def test_app_one_click_cancel_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("tkinter")
+    from exfiltrack.gui import app as gui_app
+
+    monkeypatch.setattr(gui_app.messagebox, "askokcancel", lambda *a, **k: False)
+
+    def fail_if_called(**kwargs: Any) -> Any:
+        raise AssertionError("run_quick_analysis must not run after cancel")
+
+    monkeypatch.setattr(gui_app.controller, "run_quick_analysis", fail_if_called)
+    root, window = _build_app_or_skip()
+    try:
+        window.quick_button.invoke()
+        assert window._worker is None
+        assert window.summary_var.get() == "No analysis run yet."
     finally:
         root.destroy()

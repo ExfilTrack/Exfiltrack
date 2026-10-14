@@ -117,6 +117,10 @@ exfiltrack-gui
 python -m exfiltrack.gui
 ```
 
+**Fastest path — One-Click Report.** Click **One-Click Report (this machine)** and confirm the prompt: ExfilTrack generates the case ID, examiner, and a fresh case directory under `~/ExfilTrackCases/` by itself, collects this machine's logs (read-only — exactly what `analyze --auto` does), analyzes them, states in the window whether any reconstructed session is consistent with possible USB exfiltration, and opens the HTML report. Run from an elevated terminal for full coverage; without it, the sources that could not be collected are listed in the report's *Evidence Coverage* section.
+
+For a case you want to control yourself (existing evidence exports, specific case directory):
+
 1. Enter the **case ID** and **examiner** name.
 2. Choose the mode:
    - **Offline evidence directory** — equivalent to `analyze --evidence`. Pick the evidence folder prepared earlier.
