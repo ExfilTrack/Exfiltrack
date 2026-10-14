@@ -16,6 +16,7 @@ from datetime import timedelta
 from pathlib import PureWindowsPath
 
 from exfiltrack.config import ScoringWeights
+from exfiltrack.correlation.models import NormalizedEvent
 from exfiltrack.correlation.sessions import UsbSession
 
 # Rule names. These are also the values stored in ScoreContribution.rule and
@@ -136,18 +137,31 @@ def score_session(
     contributions: list[ScoreContribution] = []
     confidential_files: list[str] = []
 
+    # Group file events by normalized path, preserving first appearance order
+    events_by_path: dict[str, list[NormalizedEvent]] = {}
+    path_display: dict[str, str] = {}
     for file_event in session.file_events:
         if file_event.file_path is None:
             continue
-        path = file_event.file_path
+        key = file_event.file_path.lower()
+        if key not in path_display:
+            path_display[key] = file_event.file_path
+        events_by_path.setdefault(key, []).append(file_event)
 
-        delta = file_event.timestamp_utc - session.start.timestamp_utc
+    for key, events in events_by_path.items():
+        path = path_display[key]
+
+        # Timing rules: pick the earliest in-session access for this file
+        in_window_events = [e for e in events if e.timestamp_utc >= session.start.timestamp_utc]
+        earliest_event = in_window_events[0] if in_window_events else events[0]
+        delta = earliest_event.timestamp_utc - session.start.timestamp_utc
+
         if timedelta(0) <= delta <= timedelta(seconds=30):
             contributions.append(
                 ScoreContribution(
                     rule=ACTIVITY_WITHIN_30S,
                     points=active_weights.activity_within_30s,
-                    source_artifacts=(file_event.source_artifact,),
+                    source_artifacts=(earliest_event.source_artifact,),
                     explanation=(
                         f"'{path}' was accessed {delta.total_seconds():.0f}s after the "
                         "session started, within the 30-second window."
@@ -159,7 +173,7 @@ def score_session(
                 ScoreContribution(
                     rule=ACTIVITY_WITHIN_5MIN,
                     points=active_weights.activity_within_5min,
-                    source_artifacts=(file_event.source_artifact,),
+                    source_artifacts=(earliest_event.source_artifact,),
                     explanation=(
                         f"'{path}' was accessed {delta.total_seconds():.0f}s after the "
                         "session started, within the 5-minute window."
@@ -172,7 +186,7 @@ def score_session(
                 ScoreContribution(
                     rule=SENSITIVE_EXTENSION,
                     points=active_weights.sensitive_extension,
-                    source_artifacts=(file_event.source_artifact,),
+                    source_artifacts=(earliest_event.source_artifact,),
                     explanation=f"'{path}' has a sensitive extension.",
                 )
             )
@@ -182,18 +196,26 @@ def score_session(
                 ScoreContribution(
                     rule=PROTECTED_DIRECTORY,
                     points=active_weights.protected_directory,
-                    source_artifacts=(file_event.source_artifact,),
+                    source_artifacts=(earliest_event.source_artifact,),
                     explanation=f"'{path}' is located in a protected project directory.",
                 )
             )
 
-        sha256 = file_event.details.get("sha256")
-        if isinstance(sha256, str) and sha256.lower() in destination_file_hashes:
+        hash_event = next(
+            (
+                e
+                for e in events
+                if isinstance(e.details.get("sha256"), str)
+                and e.details["sha256"].lower() in destination_file_hashes
+            ),
+            None,
+        )
+        if hash_event is not None:
             contributions.append(
                 ScoreContribution(
                     rule=DESTINATION_HASH_MATCH,
                     points=active_weights.destination_hash_match,
-                    source_artifacts=(file_event.source_artifact,),
+                    source_artifacts=(hash_event.source_artifact,),
                     explanation=(
                         f"'{path}' has a SHA-256 hash matching a file found on the "
                         "destination USB."
