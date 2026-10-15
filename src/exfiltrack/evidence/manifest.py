@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from exfiltrack import __tool_name__, __version__
 from exfiltrack.config import CaseConfig, ExfilTrackError
@@ -148,6 +149,22 @@ class CaseManifest:
         Digests taken after analysis; compared against ``intake_digests``.
     integrity_verdict:
         ``PENDING`` until digests are compared, then ``VERIFIED`` or ``FAILED``.
+    acquisition:
+        Live-acquisition provenance (the acquisition manifest) when the
+        evidence was collected by ``analyze --auto``; ``None`` for manual runs.
+    parser_errors:
+        Artifacts whose parser failed in a run that continues past parser
+        failures (auto mode). Always empty for strict manual runs, which
+        abort on the first failure.
+    coverage:
+        Per-source evidence coverage (issue #34) as built by
+        :func:`exfiltrack.reporting.coverage.build_coverage`; ``None`` only
+        for manifests constructed outside the pipeline (e.g. report unit
+        tests).
+    analysis_window:
+        The analysis-window cutoff (issue #68): ``{"since": <ISO-8601 UTC>,
+        "excluded_events": <int>}`` when the run was restricted to events
+        on/after a date; ``None`` for unrestricted runs.
     """
 
     case_id: str
@@ -161,6 +178,10 @@ class CaseManifest:
     intake_digests: list[DigestRecord] = field(default_factory=list)
     post_analysis_digests: list[DigestRecord] = field(default_factory=list)
     integrity_verdict: IntegrityVerdict = IntegrityVerdict.PENDING
+    acquisition: dict[str, Any] | None = None
+    parser_errors: list[dict[str, str]] = field(default_factory=list)
+    coverage: dict[str, Any] | None = None
+    analysis_window: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self._require_utc("start_time", self.start_time)
@@ -191,8 +212,13 @@ class CaseManifest:
         )
 
     def to_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable view of the whole manifest."""
-        return {
+        """Return a JSON-serialisable view of the whole manifest.
+
+        ``acquisition``, ``parser_errors``, and ``coverage`` are emitted only
+        when present, so manifests built outside the pipeline keep their
+        existing layout byte for byte.
+        """
+        payload: dict[str, object] = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "case_id": self.case_id,
             "examiner": self.examiner,
@@ -206,6 +232,15 @@ class CaseManifest:
             "post_analysis_digests": [record.to_dict() for record in self.post_analysis_digests],
             "integrity_verdict": self.integrity_verdict.value,
         }
+        if self.acquisition is not None:
+            payload["acquisition"] = self.acquisition
+        if self.parser_errors:
+            payload["parser_errors"] = [dict(error) for error in self.parser_errors]
+        if self.coverage is not None:
+            payload["coverage"] = self.coverage
+        if self.analysis_window is not None:
+            payload["analysis_window"] = dict(self.analysis_window)
+        return payload
 
 
 def snapshot_config(config: CaseConfig) -> dict[str, str]:

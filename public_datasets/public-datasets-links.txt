@@ -1,0 +1,2 @@
+https://github.com/Yamato-Security/hayabusa-sample-evtx
+https://github.com/sbousseaden/evtx-attack-samples

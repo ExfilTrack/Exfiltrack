@@ -12,18 +12,23 @@ machine with no network access.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 from exfiltrack.config import ExfilTrackError
+from exfiltrack.correlation.scoring import ScoreContribution
 from exfiltrack.evidence.manifest import CaseManifest
 from exfiltrack.reporting.model import Finding
 
-# templates/ lives at the repository root, not under src/, per
-# templates/README.md. From this file: reporting -> exfiltrack -> src -> root.
-DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+# Keep the default resources beside this module so source checkouts and
+# installed wheels use the same canonical templates and stylesheet.
+DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 REPORT_FILENAME = "report.html"
 TEMPLATE_NAME = "report.html.j2"
 
@@ -66,6 +71,130 @@ def _humanize(rule_name: str) -> str:
     return rule_name.replace("_", " ").title()
 
 
+# ---------------------------------------------------------------------------
+# Presentation view-model
+#
+# The report is investigator-facing: the reader needs the answer (which
+# session, which device, how strong) before the evidence behind it. These
+# helpers order findings by risk and roll up per-firing rule contributions
+# into per-rule rows, without dropping anything: every firing and every cited
+# artifact is still rendered, collapsed but present (traceability, requirement
+# 4), and every ordering key is total and stable (reproducibility,
+# requirement 7).
+# ---------------------------------------------------------------------------
+
+#: File-activity rows rendered directly inside an expanded session. Sessions
+#: with more events keep the remainder in a collapsed table, so the document
+#: stays complete without presenting a wall of rows by default.
+VISIBLE_FILE_EVENT_ROWS = 20
+
+
+@dataclass(frozen=True)
+class RuleFiring:
+    """One firing of a scoring rule: its explanation and cited artifacts."""
+
+    explanation: str
+    artifacts: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RuleRollup:
+    """Every firing of one scoring rule within a session, aggregated for display.
+
+    ``artifacts`` is the ordered union across firings with duplicates removed,
+    so each cited evidence file appears once no matter how often the rule fired.
+    """
+
+    rule: str
+    total_points: int
+    firings: tuple[RuleFiring, ...]
+    artifacts: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FindingView:
+    """A finding plus its presentation metadata: document anchor and rollups."""
+
+    finding: Finding
+    anchor: str
+    rollups: tuple[RuleRollup, ...]
+
+
+@dataclass(frozen=True)
+class ReportSummary:
+    """Case-level figures for the executive summary strip."""
+
+    session_count: int
+    device_count: int
+    total_file_events: int
+    highest_confidence: str
+    highest_confidence_class: str
+    max_score: int
+
+
+def _risk_key(finding: Finding) -> tuple[object, ...]:
+    """Order findings highest-risk first, with total and stable tie-breaks."""
+    return (
+        -int(finding.confidence.level),
+        -finding.scored_session.total_score,
+        finding.session.start.timestamp_utc,
+        finding.session.device.device_id,
+        finding.session.session_id,
+    )
+
+
+def _rollup_contributions(
+    contributions: Iterable[ScoreContribution],
+) -> tuple[RuleRollup, ...]:
+    """Group a session's contributions by rule, preserving every firing."""
+    by_rule: dict[str, list[ScoreContribution]] = {}
+    for contribution in contributions:
+        by_rule.setdefault(contribution.rule, []).append(contribution)
+    rollups = [
+        RuleRollup(
+            rule=rule,
+            total_points=sum(item.points for item in items),
+            firings=tuple(
+                RuleFiring(explanation=item.explanation, artifacts=item.source_artifacts)
+                for item in items
+            ),
+            artifacts=tuple(
+                dict.fromkeys(artifact for item in items for artifact in item.source_artifacts)
+            ),
+        )
+        for rule, items in by_rule.items()
+    ]
+    rollups.sort(key=lambda rollup: (-rollup.total_points, rollup.rule))
+    return tuple(rollups)
+
+
+def build_finding_views(findings: list[Finding]) -> tuple[FindingView, ...]:
+    """Order findings by risk and pre-compute each one's per-rule rollups."""
+    return tuple(
+        FindingView(
+            finding=finding,
+            anchor=f"session-{index}",
+            rollups=_rollup_contributions(finding.scored_session.contributions),
+        )
+        for index, finding in enumerate(sorted(findings, key=_risk_key), start=1)
+    )
+
+
+def summarize_views(views: tuple[FindingView, ...]) -> ReportSummary:
+    """Aggregate the case-level figures shown in the executive summary."""
+    if not views:
+        return ReportSummary(0, 0, 0, "", "none", 0)
+    highest = max(view.finding.confidence.level for view in views)
+    return ReportSummary(
+        session_count=len(views),
+        device_count=len({view.finding.session.device.device_id for view in views}),
+        total_file_events=sum(len(view.finding.session.file_events) for view in views),
+        highest_confidence=str(highest),
+        highest_confidence_class=highest.name.lower(),
+        max_score=max(view.finding.scored_session.total_score for view in views),
+    )
+
+
 def _environment(templates_dir: Path) -> Environment:
     env = Environment(
         loader=FileSystemLoader(str(templates_dir)),
@@ -98,7 +227,7 @@ def render_html_report(
             linked so the report stands alone on a machine with no network
             access.
         templates_dir: Override for the templates directory. Defaults to
-            the repository's top-level ``templates/``.
+            the packaged ``exfiltrack.reporting/templates/`` resources.
         generated_at: Override for the report's generation timestamp.
             Defaults to now, in the manifest's timezone.
 
@@ -128,10 +257,16 @@ def render_html_report(
         raise ReportError(f"Cannot read stylesheet '{css_path}': {exc}") from exc
 
     when = generated_at or datetime.now(tz=manifest.start_time.tzinfo)
+    html_limitations = Markup(
+        markdown.markdown(limitations_text, extensions=["tables", "fenced_code"])
+    )
+    views = build_finding_views(findings)
     html = template.render(
-        findings=findings,
+        finding_views=views,
+        summary=summarize_views(views),
+        visible_file_events=VISIBLE_FILE_EVENT_ROWS,
         manifest=manifest,
-        limitations_text=limitations_text,
+        limitations_text=html_limitations,
         inline_css=inline_css,
         generated_at=when,
         tool_name=manifest.tool_name,
@@ -195,7 +330,7 @@ def write_html_report(
     destination = case_output_dir.resolve() / REPORT_FILENAME
     try:
         case_output_dir.mkdir(parents=True, exist_ok=True)
-        destination.write_text(html, encoding="utf-8")
+        destination.write_text(html, encoding="utf-8", errors="backslashreplace")
     except OSError as exc:
         raise ReportError(f"Cannot write HTML report to '{destination}': {exc}") from exc
     return destination

@@ -1,12 +1,14 @@
-"""Spreadsheet-friendly CSV report generation: findings table and timeline.
+"""Spreadsheet-friendly CSV report generation: findings, timeline, coverage.
 
 Owner: Maheesha (Dabarera G. D. M.)
-Related issue: #12 - JSON/CSV Export
+Related issues: #12 - JSON/CSV Export, #34 - Evidence Coverage section
 
-Two separate tables, per the Definition of Done: a flat findings table
+Two separate tables, per the #12 Definition of Done: a flat findings table
 (one row per score contribution) and the reconstructed timeline (one row
 per file-activity event) as a separate CSV, since they answer different
 questions -- "what scored, and why" versus "what happened, in order."
+#34 adds a third, optional table: per-source evidence coverage, written by
+the pipeline as ``coverage.csv``.
 """
 
 from __future__ import annotations
@@ -16,10 +18,12 @@ import io
 from pathlib import Path
 
 from exfiltrack.config import ExfilTrackError
+from exfiltrack.reporting.coverage import EvidenceCoverage
 from exfiltrack.reporting.model import Finding
 
 FINDINGS_CSV_FILENAME = "findings.csv"
 TIMELINE_CSV_FILENAME = "timeline.csv"
+COVERAGE_CSV_FILENAME = "coverage.csv"
 
 FINDINGS_COLUMNS = (
     "session_id",
@@ -36,6 +40,10 @@ FINDINGS_COLUMNS = (
     "rule_points",
     "rule_source_artifacts",
     "rule_explanation",
+    # Issue #35: boundary evidence classes and the partial-coverage reasons.
+    "boundary_start_source",
+    "boundary_end_source",
+    "partial_coverage_reasons",
 )
 
 TIMELINE_COLUMNS = (
@@ -69,6 +77,9 @@ def _findings_rows(findings: list[Finding]) -> list[dict[str, str]]:
             "total_score": str(finding.scored_session.total_score),
             "confidence_level": finding.confidence.level.name,
             "confidence_reason": finding.confidence.reason,
+            "boundary_start_source": session.boundary_sources[0],
+            "boundary_end_source": session.boundary_sources[1],
+            "partial_coverage_reasons": "; ".join(session.partial_coverage_reasons),
         }
         contributions = finding.scored_session.contributions
         if not contributions:
@@ -176,3 +187,42 @@ def write_csv_reports(findings: list[Finding], case_output_dir: Path) -> tuple[P
     findings_path = write_findings_csv(findings, case_output_dir)
     timeline_path = write_timeline_csv(findings, case_output_dir)
     return findings_path, timeline_path
+
+
+# ---------------------------------------------------------------------------
+# Evidence coverage (issue #34)
+# ---------------------------------------------------------------------------
+
+COVERAGE_COLUMNS = ("source", "status", "supplied", "parsed", "event_count", "note")
+
+
+def render_coverage_csv(coverage: EvidenceCoverage) -> str:
+    """Render the per-source evidence coverage table.
+
+    Row order comes from :class:`~exfiltrack.reporting.coverage.EvidenceCoverage`,
+    which is fixed, so output is byte-identical across runs on identical
+    input like the other two tables.
+    """
+    rows = [
+        {
+            "source": row.source,
+            "status": row.status.value,
+            "supplied": str(row.supplied),
+            "parsed": str(row.parsed),
+            "event_count": str(row.event_count),
+            "note": row.note,
+        }
+        for row in coverage.sources
+    ]
+    return _render_csv(COVERAGE_COLUMNS, rows)
+
+
+def write_coverage_csv(coverage: EvidenceCoverage, case_output_dir: Path) -> Path:
+    """Write the coverage table into *case_output_dir* and return its path."""
+    destination = case_output_dir.resolve() / COVERAGE_CSV_FILENAME
+    try:
+        case_output_dir.mkdir(parents=True, exist_ok=True)
+        destination.write_text(render_coverage_csv(coverage), encoding="utf-8")
+    except OSError as exc:
+        raise ReportError(f"Cannot write coverage CSV to '{destination}': {exc}") from exc
+    return destination

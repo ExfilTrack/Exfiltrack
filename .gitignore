@@ -7,6 +7,7 @@ __pycache__/
 /build/
 /develop-eggs/
 /dist/
+*.exe
 /downloads/
 /eggs/
 /.eggs/
@@ -64,6 +65,8 @@ desktop.ini
 /case_output/
 /output/
 /reports/
+/cases-outputs/
+case_output-VM
 
 # Evidence file formats. Left unanchored on purpose: acquired evidence may be
 # placed in any local directory, and excluding it by extension everywhere is
@@ -106,6 +109,11 @@ local_config.*
 !tests/fixtures/**
 !examples/synthetic/
 !examples/synthetic/**
+
+/public_datasets/*
+!/public_datasets/public-datasets-links.txt
+!/public_datasets/test_evidence_suite/
+!/public_datasets/test_evidence_suite/**
 
 
 Cyber Project Proposal.pdf

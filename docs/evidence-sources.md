@@ -85,6 +85,16 @@ The `usb_device_install` and `usb_remove_pending` lifecycle labels preserve
 useful evidence for the report appendix. Only `usb_insert` and `usb_remove`
 are session boundaries for correlation.
 
+**Device identity.** DriverFrameworks records USB storage devices wrapped in
+the WPD bus enumerator, e.g.
+`SWD\WPDBUSENUM\_??_USBSTOR#DISK&VEN_KINGSTON&...#{<volume GUID>}` for the
+stick the registry calls `USBSTOR\Disk&Ven_Kingston&...`. The pipeline
+canonicalizes both spellings to one device identity and merges in the
+registry's friendly name (#70), so a session displays e.g. "Kingston
+DataTraveler 3.0" while the raw event-log id stays recorded as
+`reported_device_id`. The channel also logs non-storage devices; only
+storage-class device events form sessions.
+
 ## 3. Shortcut Files (`.lnk`)
 
 **Parser:** `parsers/lnk_parser.py` (Thabrew)

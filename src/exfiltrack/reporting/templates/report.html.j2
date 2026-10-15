@@ -1,0 +1,466 @@
+{# ExfilTrack HTML report (issue #11). Self-contained: no external CSS,
+   fonts, or scripts. All evidence-derived values are autoescaped by the
+   Environment configured in html_report.py.
+
+   Layout: the reader gets the answer first (Executive Summary), then the
+   evidence behind it. Findings are ordered highest-risk first and collapsed
+   by default; every firing, event, and cited artifact is still rendered
+   inside the collapsed regions (traceability is never traded for brevity). #}
+{% set acquisition = manifest.acquisition if (manifest.acquisition is defined and manifest.acquisition is not none) else none %}
+{% macro file_event_table(events) %}
+            <table class="file-events">
+              <thead>
+                <tr><th>Timestamp (UTC)</th><th>File path</th><th>Source artifact</th></tr>
+              </thead>
+              <tbody>
+                {% for event in events %}
+                <tr>
+                  <td class="mono">{{ event.timestamp_utc | fmt_ts }}</td>
+                  <td class="mono">{{ event.file_path }}</td>
+                  <td class="mono">{{ event.source_artifact }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+{% endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ExfilTrack Report - {{ manifest.case_id }}</title>
+  <style>{{ inline_css }}</style>
+</head>
+<body>
+  <div class="report">
+    <header class="report-header">
+      <h1>ExfilTrack Report</h1>
+      <div class="report-subtitle">
+        Case <strong>{{ manifest.case_id }}</strong>
+        &middot; Examiner <strong>{{ manifest.examiner }}</strong>
+        &middot; Generated {{ generated_at | fmt_ts }}
+      </div>
+    </header>
+
+    <div class="disclaimer">
+      Findings in this report describe activity <strong>consistent with possible exfiltration</strong>.
+      Temporal correlation alone does not prove that a
+      file was copied. See <a href="#limitations">Limitations</a> before
+      acting on any finding below.
+    </div>
+
+    <nav class="report-nav" aria-label="Report sections">
+      <a href="#summary">Summary</a>
+      {% if acquisition %}<a href="#evidence-coverage">Evidence Coverage</a>{% endif %}
+      {% if manifest.coverage is defined and manifest.coverage is not none %}<a href="#source-coverage">Source Coverage</a>{% endif %}
+      {% if manifest.parser_errors is defined and manifest.parser_errors %}<a href="#analysis-coverage">Analysis Coverage</a>{% endif %}
+      <a href="#findings">Findings</a>
+      <a href="#chain-of-custody">Chain of Custody</a>
+      <a href="#limitations">Limitations</a>
+    </nav>
+
+    <section id="summary">
+      <h2>Executive Summary</h2>
+      {% if summary.session_count == 0 %}
+        <p class="no-findings">No USB sessions were reconstructed from the supplied evidence.</p>
+      {% else %}
+        <p class="summary-line">
+          {{ summary.session_count }} USB session(s) reconstructed across
+          {{ summary.device_count }} device(s), with
+          {{ summary.total_file_events }} file event(s) inside session windows.
+          Highest confidence:
+          <span class="badge badge-confidence-{{ summary.highest_confidence_class }}">{{ summary.highest_confidence }}</span>.
+          Highest session score: <strong>{{ summary.max_score }}</strong>.
+          Integrity verdict:
+          <span class="badge badge-verdict-{{ manifest.integrity_verdict.value }}">{{ manifest.integrity_verdict.value }}</span>.
+        </p>
+        <table class="summary-table">
+          <thead>
+            <tr><th>#</th><th>Device</th><th>Window (UTC)</th><th>Confidence</th><th>Score</th><th>File events</th></tr>
+          </thead>
+          <tbody>
+            {% for view in finding_views %}
+              {% set session = view.finding.session %}
+              <tr>
+                <td><a href="#{{ view.anchor }}">{{ loop.index }}</a></td>
+                <td>
+                  {{ session.device.display_name }}
+                  {% if session.device.serial_number and session.device.serial_number not in session.device.display_name %}
+                    <div class="device-sub mono">S/N {{ session.device.serial_number }}</div>
+                  {% endif %}
+                </td>
+                <td class="mono window-cell">
+                  <div>{{ session.start.timestamp_utc | fmt_ts }}</div>
+                  <div>{{ session.end.timestamp_utc | fmt_ts }}</div>
+                  {% if not session.is_fully_observed %}
+                    <span class="badge badge-inferred">inferred boundary</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge badge-confidence-{{ view.finding.confidence.level.name | lower }}">{{ view.finding.confidence.level }}</span>
+                </td>
+                <td class="score-total">{{ view.finding.scored_session.total_score }}</td>
+                <td>{{ session.file_events | length }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="summary-note">Sessions are listed highest-risk first; select a row number to jump to its full evidence.</p>
+      {% endif %}
+      {% if manifest.parser_errors is defined and manifest.parser_errors %}
+        <div class="summary-alert" role="note">
+          Analysis is partial: {{ manifest.parser_errors | length }} artifact(s) could not be
+          parsed. Review <a href="#analysis-coverage">Analysis Coverage</a> before interpreting findings.
+        </div>
+      {% endif %}
+      {% if acquisition and acquisition.coverage == 'partial' %}
+        <div class="summary-alert" role="note">
+          Evidence collection coverage is partial. Review
+          <a href="#evidence-coverage">Evidence Coverage</a> before interpreting findings.
+        </div>
+      {% endif %}
+      {% if manifest.coverage is defined and manifest.coverage is not none and not manifest.coverage.complete %}
+        <div class="summary-alert" role="note">
+          Some expected evidence sources were absent or empty. Review
+          <a href="#source-coverage">Evidence Coverage by Source</a>: absent evidence is not
+          evidence of absent activity.
+        </div>
+      {% endif %}
+    </section>
+
+    {% if acquisition %}
+      <section id="evidence-coverage">
+        <h2>Evidence Coverage</h2>
+        {% if acquisition.coverage == 'partial' %}
+          <div class="coverage-warning" role="note">
+            <strong>Partial evidence coverage.</strong> Findings are limited to the collected snapshots.
+            Review incomplete or unavailable sources and diagnostics below before interpreting findings.
+          </div>
+        {% endif %}
+        <table>
+          <tbody>
+            <tr><th>Collection coverage</th><td><span class="badge badge-coverage-{{ acquisition.coverage }}">{{ acquisition.coverage | title }}</span></td></tr>
+            <tr><th>Collection machine</th><td>{{ acquisition.computer_name }}</td></tr>
+            <tr><th>Collection case ID</th><td>{{ acquisition.case_id }}</td></tr>
+            <tr><th>Collection examiner</th><td>{{ acquisition.examiner }}</td></tr>
+            <tr><th>Collection started</th><td class="mono">{{ acquisition.start_time }}</td></tr>
+            <tr><th>Collection ended</th><td class="mono">{% if acquisition.end_time %}{{ acquisition.end_time }}{% else %}in progress{% endif %}</td></tr>
+            <tr><th>Acquisition schema version</th><td>{{ acquisition.schema_version }}</td></tr>
+          </tbody>
+        </table>
+        <p>Coverage describes the recorded collection attempts, not completeness of historical activity.</p>
+        <p class="acquisition-disclaimer">
+          Live collection creates activity on the collection machine. Snapshots are not atomic.
+          The integrity verdict applies to collected snapshots, not to an unchanged live system.
+          Absent evidence does not mean absence of activity.
+          Enabling logging afterward cannot recover past events.
+        </p>
+        {% if acquisition.limitations %}
+          <h3>Acquisition Limitations</h3>
+          <ul>
+            {% for limitation in acquisition.limitations %}
+              <li>{{ limitation }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if acquisition.records %}
+          <details class="records">
+            <summary>Collection records ({{ acquisition.records | length }})</summary>
+            <table class="acquisition-records">
+              <thead>
+                <tr><th>Category</th><th>Source and snapshot</th><th>Method</th><th>Status</th><th>Collection time</th><th>Diagnostics</th></tr>
+              </thead>
+              <tbody>
+                {% for record in acquisition.records %}
+                  <tr>
+                    <td>{{ record.category }}</td>
+                    <td>
+                      <div class="mono">{{ record.source }}</div>
+                      {% if record.status == 'collected' %}
+                        <div><strong>Destination (relative to evidence root)</strong></div>
+                        <div class="mono">{{ record.destination }}</div>
+                        <div><strong>SHA-256</strong></div>
+                        <div class="mono">{{ record.sha256 }}</div>
+                      {% endif %}
+                    </td>
+                    <td>{{ record.method }}</td>
+                    <td><span class="badge badge-acquisition-{{ record.status }}">{{ record.status }}</span></td>
+                    <td>
+                      <div><strong>Started</strong></div>
+                      <div class="mono">{{ record.started_at }}</div>
+                      <div><strong>Finished</strong></div>
+                      <div class="mono">{% if record.finished_at %}{{ record.finished_at }}{% else %}in progress{% endif %}</div>
+                    </td>
+                    <td>
+                      {% if record.message %}<div class="acquisition-message">{{ record.message }}</div>{% endif %}
+                      {% if record.metadata %}
+                        <dl class="acquisition-metadata">
+                          {% for key, value in record.metadata.items() %}
+                            <dt>{{ key }}</dt><dd>{{ value }}</dd>
+                          {% endfor %}
+                        </dl>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        {% else %}
+          <p class="no-activity">No acquisition records were supplied.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+    {% if manifest.coverage is defined and manifest.coverage is not none %}
+      {# Per-source coverage at intake/parse time (issue #34). Present for every
+         analyzed run; complements the acquisition block above (collection time)
+         on live-acquisition cases. #}
+      <section id="source-coverage">
+        <h2>Evidence Coverage by Source</h2>
+        {% if not manifest.coverage.complete %}
+          <div class="coverage-warning" role="note">
+            <strong>Evidence coverage is not complete.</strong> A source marked absent or
+            empty below could not speak to what happened: absent evidence is not evidence
+            of absent activity.
+          </div>
+        {% endif %}
+        <table>
+          <thead>
+            <tr><th>Source</th><th>Status</th><th>Supplied</th><th>Parsed</th><th>Events</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            {% for row in manifest.coverage.sources %}
+            <tr>
+              <td class="mono">{{ row.source }}</td>
+              <td><span class="badge badge-source-{{ row.status }}">{{ row.status | title }}</span></td>
+              <td>{{ row.supplied }}</td>
+              <td>{{ row.parsed }}</td>
+              <td>{{ row.event_count }}</td>
+              <td>{{ row.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p>
+          Coverage describes which expected sources were supplied to the analyzer and what
+          they yielded at parse time. Distinguish a source that recorded nothing (empty)
+          from one that was never supplied (absent): only the former is evidence the
+          activity did not occur, and even then only within that source's limits.
+        </p>
+      </section>
+    {% endif %}
+    {% if manifest.parser_errors is defined and manifest.parser_errors %}
+      <section id="analysis-coverage">
+        <h2>Analysis Coverage</h2>
+        <div class="analysis-warning" role="note">
+          <strong>Partial analysis.</strong> One or more artifacts could not be parsed.
+          Findings are based only on successfully parsed evidence; failed artifacts do not mean absence of activity.
+          Review the errors below before interpreting findings.
+        </div>
+        <table class="parser-errors">
+          <thead>
+            <tr><th>Source artifact</th><th>Artifact type</th><th>Parser name</th><th>Parser version</th><th>Error type</th><th>Message</th></tr>
+          </thead>
+          <tbody>
+            {% for parser_error in manifest.parser_errors %}
+              <tr>
+                <td class="mono">{{ parser_error.source_artifact }}</td>
+                <td>{{ parser_error.artifact_type }}</td>
+                <td>{{ parser_error.parser_name }}</td>
+                <td>{{ parser_error.parser_version }}</td>
+                <td>{{ parser_error.error_type }}</td>
+                <td class="parser-error-message">{{ parser_error.message }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    {% endif %}
+    <section id="findings">
+      <h2>Findings ({{ summary.session_count }})</h2>
+      {% if not finding_views %}
+        <p class="no-findings">No USB sessions were reconstructed from the supplied evidence.</p>
+      {% else %}
+        {% for view in finding_views %}
+          {% set finding = view.finding %}
+          {% set session = finding.session %}
+          {% set scored = finding.scored_session %}
+          <details class="session" id="{{ view.anchor }}"{% if loop.first %} open{% endif %}>
+            <summary class="session-header">
+              <span class="session-index">#{{ loop.index }}</span>
+              <span class="device-name">{{ session.device.display_name }}</span>
+              <span class="badge badge-confidence-{{ finding.confidence.level.name | lower }}">
+                {{ finding.confidence.level }}
+              </span>
+              <span class="score-total">Score {{ scored.total_score }}</span>
+              <span class="session-events">{{ session.file_events | length }} file event(s)</span>
+              <span class="session-window mono">{{ session.start.timestamp_utc | fmt_ts }} &ndash; {{ session.end.timestamp_utc | fmt_ts }}</span>
+            </summary>
+            <div class="session-body">
+              {% if session.device.device_id != session.device.display_name %}
+                <div class="boundary-row">
+                  <span class="label">Device ID</span>
+                  <span class="mono">{{ session.device.device_id }}</span>
+                </div>
+              {% endif %}
+              <div class="boundary-row">
+                <span class="label">Start</span>
+                <span class="mono">{{ session.start.timestamp_utc | fmt_ts }}</span>
+                {% if session.start.observed %}
+                  <span class="badge badge-observed">Observed</span>
+                {% else %}
+                  <span class="badge badge-inferred">Inferred</span>
+                {% endif %}
+              </div>
+              <div class="boundary-row">
+                <span class="label">End</span>
+                <span class="mono">{{ session.end.timestamp_utc | fmt_ts }}</span>
+                {% if session.end.observed %}
+                  <span class="badge badge-observed">Observed</span>
+                {% else %}
+                  <span class="badge badge-inferred">Inferred</span>
+                {% endif %}
+              </div>
+              {% if scored.partial_coverage_reasons %}
+                {# Issue #35: disclose weaker boundary evidence next to the
+                   level; the level itself is unchanged by design. #}
+                <div class="boundary-warning" role="note">
+                  <strong>Partial coverage.</strong> This session was bounded without the
+                  full evidence set, so its score is not directly comparable to a fully
+                  event-log-observed session:
+                  <ul>
+                    {% for reason in scored.partial_coverage_reasons %}
+                      <li>{{ reason }}</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% endif %}
+              <p><em>{{ finding.confidence.reason }}</em></p>
+
+              {% if view.rollups %}
+                <table>
+                  <thead>
+                    <tr><th>Rule</th><th>Firings</th><th>Points</th><th>Source artifact(s)</th><th>Detail</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for rollup in view.rollups %}
+                    <tr>
+                      <td>{{ rollup.rule | humanize }}</td>
+                      <td>{{ rollup.firings | length }}</td>
+                      <td>{{ rollup.total_points }}</td>
+                      <td>
+                        {% for artifact in rollup.artifacts[:5] %}
+                          <div class="mono">{{ artifact }}</div>
+                        {% endfor %}
+                        {% if rollup.artifacts | length > 5 %}
+                          <details class="more-artifacts">
+                            <summary>and {{ rollup.artifacts | length - 5 }} more</summary>
+                            {% for artifact in rollup.artifacts[5:] %}
+                              <div class="mono">{{ artifact }}</div>
+                            {% endfor %}
+                          </details>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if rollup.firings | length == 1 %}
+                          {{ rollup.firings[0].explanation }}
+                        {% else %}
+                          <details class="firings">
+                            <summary>Show {{ rollup.firings | length }} firings</summary>
+                            <ul>
+                              {% for firing in rollup.firings %}
+                                <li>{{ firing.explanation }}</li>
+                              {% endfor %}
+                            </ul>
+                          </details>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <p class="no-activity">No scoring rule fired for this session.</p>
+              {% endif %}
+
+              {% if session.file_events %}
+                {% if session.file_events | length > visible_file_events %}
+                  <p class="event-count">
+                    {{ session.file_events | length }} file events fell within this session's
+                    window; the first {{ visible_file_events }} are shown and the remainder
+                    are collapsed below.
+                  </p>
+                  {{ file_event_table(session.file_events[:visible_file_events]) }}
+                  <details class="more-events">
+                    <summary>Show the remaining {{ session.file_events | length - visible_file_events }} events</summary>
+                    {{ file_event_table(session.file_events[visible_file_events:]) }}
+                  </details>
+                {% else %}
+                  {{ file_event_table(session.file_events) }}
+                {% endif %}
+              {% else %}
+                <p class="no-activity">No file activity fell within this session's window.</p>
+              {% endif %}
+            </div>
+          </details>
+        {% endfor %}
+      {% endif %}
+    </section>
+
+    <section id="chain-of-custody">
+      <h2>Chain of Custody</h2>
+      <table>
+        <tbody>
+          <tr><th>Case ID</th><td>{{ manifest.case_id }}</td></tr>
+          <tr><th>Examiner</th><td>{{ manifest.examiner }}</td></tr>
+          <tr><th>Tool</th><td>{{ manifest.tool_name }} {{ manifest.tool_version }}</td></tr>
+          <tr><th>Run started</th><td class="mono">{{ manifest.start_time | fmt_ts }}</td></tr>
+          <tr>
+            <th>Run ended</th>
+            <td class="mono">{% if manifest.end_time %}{{ manifest.end_time | fmt_ts }}{% else %}in progress{% endif %}</td>
+          </tr>
+          {% if manifest.analysis_window is defined and manifest.analysis_window is not none %}
+            <tr>
+              <th>Analysis window</th>
+              <td>
+                Only events on/after <span class="mono">{{ manifest.analysis_window.since }}</span>
+                were analyzed; {{ manifest.analysis_window.excluded_events }} earlier event(s)
+                were excluded by the configured cutoff (issue #68).
+              </td>
+            </tr>
+          {% endif %}
+          <tr>
+            <th>Integrity verdict</th>
+            <td><span class="badge badge-verdict-{{ manifest.integrity_verdict.value }}">{{ manifest.integrity_verdict.value }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      {% if manifest.parser_records %}
+        <h3>Parsers</h3>
+        <table>
+          <thead><tr><th>Parser</th><th>Version</th></tr></thead>
+          <tbody>
+            {% for record in manifest.parser_records %}
+            <tr><td>{{ record.name }}</td><td>{{ record.version }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <p>
+        {{ manifest.intake_digests | length }} artifact digest(s) recorded at intake,
+        {{ manifest.post_analysis_digests | length }} recorded post-analysis.
+      </p>
+    </section>
+
+    <section id="limitations" class="limitations">
+      <h2>Limitations</h2>
+      <div>{{ limitations_text }}</div>
+    </section>
+
+    <footer class="report-footer">
+      Generated by {{ tool_name }} {{ tool_version }} on {{ generated_at | fmt_ts }}.
+    </footer>
+  </div>
+</body>
+</html>

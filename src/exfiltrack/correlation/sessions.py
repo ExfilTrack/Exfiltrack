@@ -57,6 +57,23 @@ class SessionBoundary:
             raise ValueError("An observed boundary must cite the event that established it.")
 
 
+def _boundary_source(boundary: SessionBoundary) -> str:
+    """Classify the evidence behind one session boundary (issue #35).
+
+    Returns ``"event_log"`` when an explicit event-log record backs the
+    boundary, ``"registry_properties"`` when it comes from registry
+    properties 0066/0067 (tagged ``records_most_recent_only`` by the registry
+    parser: they record only the most recent connection and are overwritten
+    on each one), and ``"inferred"`` when the idle-gap heuristic had to stand
+    in.
+    """
+    if not boundary.observed or boundary.source_event is None:
+        return "inferred"
+    if boundary.source_event.details.get("records_most_recent_only"):
+        return "registry_properties"
+    return "event_log"
+
+
 @dataclass
 class UsbSession:
     """A probable USB device connection window.
@@ -82,6 +99,45 @@ class UsbSession:
     def is_fully_observed(self) -> bool:
         """``True`` only if both boundaries are backed by an explicit event."""
         return self.start.observed and self.end.observed
+
+    @property
+    def boundary_sources(self) -> tuple[str, str]:
+        """Evidence class behind the (start, end) boundaries (issue #35).
+
+        One of ``"event_log"``, ``"registry_properties"``, or ``"inferred"``
+        per boundary -- see :func:`_boundary_source`. Recorded on the session
+        so a score built on weaker boundary evidence is never
+        indistinguishable from a fully event-log-observed one.
+        """
+        return (_boundary_source(self.start), _boundary_source(self.end))
+
+    @property
+    def partial_coverage_reasons(self) -> tuple[str, ...]:
+        """Why this session's boundaries are weaker than event-log-observed.
+
+        Empty when both boundaries come from explicit event-log records.
+        Surfaced in every report format alongside the confidence level; the
+        level itself is deliberately not adjusted (decision recorded on
+        issue #35 and in ``docs/scoring-model.md``).
+        """
+        reasons: list[str] = []
+        for label, source in zip(("Start", "End"), self.boundary_sources, strict=True):
+            if source == "registry_properties":
+                reasons.append(
+                    f"{label} boundary comes from registry properties 0066/0067, which "
+                    "record only the most recent connection and are overwritten on each one."
+                )
+            elif source == "inferred":
+                reasons.append(
+                    f"{label} boundary was inferred from the idle gap; no explicit "
+                    "insert/remove event was recorded."
+                )
+        return tuple(reasons)
+
+    @property
+    def partial_coverage(self) -> bool:
+        """``True`` when any boundary rests on weaker-than-event-log evidence."""
+        return bool(self.partial_coverage_reasons)
 
 
 def _session_id(device_id: str, start_ts: datetime) -> str:
@@ -183,10 +239,15 @@ def _reconstruct_device_sessions(
     """
     sessions: list[UsbSession] = []
     pending_start: SessionBoundary | None = None
+    last_closed_end_ts: datetime | None = None
 
     for event in ordered_events:
         if event.event_type in insert_types:
             if pending_start is not None:
+                if event.timestamp_utc == pending_start.timestamp_utc or (
+                    event.timestamp_utc - pending_start.timestamp_utc
+                ) <= timedelta(seconds=2):
+                    continue
                 sessions.append(
                     UsbSession(
                         session_id=_session_id(device_id, pending_start.timestamp_utc),
@@ -195,6 +256,7 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=False),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
             pending_start = SessionBoundary(event.timestamp_utc, observed=True, source_event=event)
 
         elif event.event_type in remove_types:
@@ -207,8 +269,13 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=True, source_event=event),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
                 pending_start = None
             else:
+                if last_closed_end_ts is not None and (
+                    event.timestamp_utc - last_closed_end_ts
+                ) <= timedelta(seconds=2):
+                    continue
                 inferred_start_ts = event.timestamp_utc - idle_gap
                 sessions.append(
                     UsbSession(
@@ -218,6 +285,7 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=True, source_event=event),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
 
     if pending_start is not None:
         inferred_end_ts = pending_start.timestamp_utc + idle_gap

@@ -150,12 +150,18 @@ class ArtifactRecord:
     intake_digest:
         SHA-256 hex digest computed at intake.  This value is recorded in the
         chain-of-custody manifest and re-verified after analysis.
+    intake_error:
+        Set only by lenient discovery (``strict=False``) when the file's name
+        claims a signed type its header contradicts. ``artifact_type`` then
+        holds the type the name claimed, and the file is hashed but must not
+        be handed to that type's parser.
     """
 
     path: Path
     artifact_type: ArtifactType
     size_bytes: int
     intake_digest: str
+    intake_error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +169,7 @@ class ArtifactRecord:
 # ---------------------------------------------------------------------------
 
 
-def discover_artifacts(evidence_dir: Path) -> list[ArtifactRecord]:
+def discover_artifacts(evidence_dir: Path, *, strict: bool = True) -> list[ArtifactRecord]:
     """Walk *evidence_dir* and return an intake record for every file found.
 
     Every file in the tree is processed — none are silently skipped.  If a
@@ -174,6 +180,13 @@ def discover_artifacts(evidence_dir: Path) -> list[ArtifactRecord]:
     ----------
     evidence_dir:
         Root of the (offline) evidence directory.  Must be a directory.
+    strict:
+        When ``True`` (the default), a file whose name claims a signed type
+        that its header contradicts raises :exc:`ArtifactError`. When
+        ``False`` it is instead returned with ``intake_error`` set, so one
+        corrupt file (live ``Recent`` folders routinely contain some) does not
+        discard the rest of the evidence. It is still hashed and reported.
+        Unreadable files raise in both modes.
 
     Returns
     -------
@@ -191,14 +204,25 @@ def discover_artifacts(evidence_dir: Path) -> list[ArtifactRecord]:
     if not evidence_dir.is_dir():
         raise NotADirectoryError(f"Evidence path is not a directory: '{evidence_dir}'")
 
-    return [_intake_file(entry) for entry in sorted(evidence_dir.rglob("*")) if entry.is_file()]
+    return [
+        _intake_file(entry, strict=strict)
+        for entry in sorted(evidence_dir.rglob("*"))
+        if entry.is_file()
+    ]
 
 
-def _intake_file(path: Path) -> ArtifactRecord:
+def _intake_file(path: Path, *, strict: bool = True) -> ArtifactRecord:
     """Classify and hash a single evidence file, opened read-only."""
+    intake_error: str | None = None
     try:
         size_bytes = path.stat().st_size
-        artifact_type = _classify(path, size_bytes)
+        try:
+            artifact_type = _classify(path, size_bytes)
+        except ArtifactError as exc:
+            if strict:
+                raise
+            artifact_type = _classify_by_name(path)
+            intake_error = str(exc)
         digest = hash_file(path)
     except OSError as exc:
         raise ArtifactError(
@@ -211,4 +235,5 @@ def _intake_file(path: Path) -> ArtifactRecord:
         artifact_type=artifact_type,
         size_bytes=size_bytes,
         intake_digest=digest,
+        intake_error=intake_error,
     )

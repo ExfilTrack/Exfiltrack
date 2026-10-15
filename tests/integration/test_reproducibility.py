@@ -63,7 +63,14 @@ def test_identical_evidence_and_config_produce_byte_identical_reports(
     second = run_scenario(monkeypatch, evidence_dir, case_output_dir, records)
     second_bytes = {name: path.read_bytes() for name, path in second.report_paths.items()}
 
-    assert first_bytes.keys() == {"manifest", "json", "findings_csv", "timeline_csv", "html"}
+    assert first_bytes.keys() == {
+        "manifest",
+        "json",
+        "findings_csv",
+        "timeline_csv",
+        "coverage_csv",
+        "html",
+    }
     assert first_bytes == second_bytes
 
 

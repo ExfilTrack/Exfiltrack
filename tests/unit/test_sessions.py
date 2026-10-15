@@ -197,3 +197,39 @@ def test_device_event_without_device_identity_raises() -> None:
 
     with pytest.raises(SessionReconstructionError):
         reconstruct_sessions([bad_event])
+
+
+@pytest.mark.unit
+def test_duplicate_removal_events_do_not_spawn_orphan_session() -> None:
+    """Duplicate removals from multiple artifacts (e.g. EVTX and Registry) do not spawn an orphan session."""
+    device = make_device()
+    events = [
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device, source_artifact="logs/System.evtx"),
+        make_remove_event(utc(2026, 1, 1, 9, 30, 0), device, source_artifact="logs/System.evtx"),
+        make_remove_event(utc(2026, 1, 1, 9, 30, 0), device, source_artifact="registry/SYSTEM"),
+    ]
+
+    sessions = reconstruct_sessions(events)
+
+    assert len(sessions) == 1
+    assert sessions[0].is_fully_observed is True
+    assert sessions[0].start.timestamp_utc == utc(2026, 1, 1, 9, 0, 0)
+    assert sessions[0].end.timestamp_utc == utc(2026, 1, 1, 9, 30, 0)
+
+
+@pytest.mark.unit
+def test_duplicate_insert_events_do_not_prematurely_close_session() -> None:
+    """Duplicate inserts from multiple artifacts (e.g. EVTX and Registry) do not split the session."""
+    device = make_device()
+    events = [
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device, source_artifact="logs/System.evtx"),
+        make_insert_event(utc(2026, 1, 1, 9, 0, 0), device, source_artifact="registry/SYSTEM"),
+        make_remove_event(utc(2026, 1, 1, 9, 30, 0), device, source_artifact="logs/System.evtx"),
+    ]
+
+    sessions = reconstruct_sessions(events)
+
+    assert len(sessions) == 1
+    assert sessions[0].is_fully_observed is True
+    assert sessions[0].start.timestamp_utc == utc(2026, 1, 1, 9, 0, 0)
+    assert sessions[0].end.timestamp_utc == utc(2026, 1, 1, 9, 30, 0)

@@ -116,4 +116,4 @@ def merge_streams(*streams: Iterable[NormalizedEvent]) -> Iterator[NormalizedEve
     merge. Exact-key ties retain per-stream order, and earlier stream arguments
     win ties between streams.
     """
-    return heapq.merge(*streams, key=_sort_key)
+    return iter(heapq.merge(*streams, key=_sort_key))
