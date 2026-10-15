@@ -3,7 +3,11 @@
 The parser recognizes a deliberately small, documented set of events.  See
 ``docs/evidence-sources.md`` for their evidentiary meaning and limitations.
 Unsupported, well-formed events are not findings; malformed records and
-selected records missing required fields raise :class:`EvtxParseError`.
+selected records missing required fields raise :class:`EvtxParseError` --
+unless the caller supplies ``record_errors``, in which case a malformed
+record is recorded there and skipped while the rest of the file is parsed
+(a single bad record must not silently discard a whole log's worth of
+valid evidence, but every skip is still reported, never silent).
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ class EvtxParseError(ExfilTrackError):
 
 
 PARSER_NAME = "evtx_parser"
-PARSER_VERSION = "1.1.0"
+PARSER_VERSION = "1.2.0"
 
 _NS = {"ns": "http://schemas.microsoft.com/win/2004/08/events/event"}
 _DFU_PROVIDER = "Microsoft-Windows-DriverFrameworks-UserMode"
@@ -47,17 +51,29 @@ def _parse_timestamp(raw_timestamp: str | None) -> datetime:
         raise EvtxParseError(str(exc)) from exc
 
 
-def parse_evtx(file_path: Path | str) -> Iterator[NormalizedEvent]:
+def parse_evtx(
+    file_path: Path | str,
+    *,
+    record_errors: list[dict[str, str]] | None = None,
+) -> Iterator[NormalizedEvent]:
     """Yield normalized events from an EVTX file opened read-only.
 
     Args:
         file_path: Path to an exported Windows Event Log.
+        record_errors: When a list is supplied, a malformed record is
+            appended to it (``source_artifact`` + ``message``) and skipped,
+            and parsing continues with the next record, so one bad record
+            cannot discard a whole log's valid events. Every skip is
+            reported through this list -- nothing is silently dropped.
+            When ``None`` (the default), the first malformed record raises,
+            preserving the strict fail-fast contract.
 
     Yields:
         Supported device-lifecycle and Security 4663 file-object events.
 
     Raises:
-        EvtxParseError: If the EVTX file cannot be read or a record is malformed.
+        EvtxParseError: If the EVTX file itself cannot be read, or -- when
+            ``record_errors`` is ``None`` -- a record is malformed.
     """
     path = Path(file_path)
     source_artifact = path.as_posix()
@@ -67,9 +83,30 @@ def parse_evtx(file_path: Path | str) -> Iterator[NormalizedEvent]:
                 try:
                     root = ET.fromstring(record.xml())
                 except ET.ParseError as exc:
-                    raise EvtxParseError(f"Malformed XML in '{source_artifact}': {exc}") from exc
+                    if record_errors is None:
+                        raise EvtxParseError(
+                            f"Malformed XML in '{source_artifact}': {exc}"
+                        ) from exc
+                    record_errors.append(
+                        {
+                            "source_artifact": source_artifact,
+                            "message": f"Malformed XML record skipped: {exc}",
+                        }
+                    )
+                    continue
 
-                event = _process_record(root, source_artifact)
+                try:
+                    event = _process_record(root, source_artifact)
+                except EvtxParseError as exc:
+                    if record_errors is None:
+                        raise
+                    record_errors.append(
+                        {
+                            "source_artifact": source_artifact,
+                            "message": f"Malformed record skipped: {exc}",
+                        }
+                    )
+                    continue
                 if event is not None:
                     yield event
     except EvtxParseError:

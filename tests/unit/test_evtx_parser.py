@@ -170,3 +170,106 @@ def test_security_4663_without_object_type_raises_error(monkeypatch: pytest.Monk
 
     with pytest.raises(EvtxParseError, match="Missing ObjectType"):
         _parse_synthetic(monkeypatch, [event])
+
+
+# --- Per-record resilience (report under-count fix) --------------------------
+#
+# A real Security.evtx routinely contains a record the strict reader rejects
+# (a 4663 missing a field, a corrupted XML fragment). Without per-record
+# tolerance, the first such record aborted the whole log and every remaining
+# valid file-access event vanished from the report. With ``record_errors``
+# the bad record is skipped and reported; without it, the strict fail-fast
+# contract is unchanged.
+
+_VALID_4663 = (
+    '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System>'
+    '<Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4663</EventID>'
+    '<TimeCreated SystemTime="{when}"/></System><EventData>'
+    '<Data Name="ObjectType">File</Data><Data Name="ObjectName">{name}</Data>'
+    '<Data Name="AccessMask">0x1</Data></EventData></Event>'
+)
+
+_MALFORMED_4663_NO_OBJECT_NAME = (
+    '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System>'
+    '<Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4663</EventID>'
+    '<TimeCreated SystemTime="2026-03-01T09:00:07.0000000Z"/></System>'
+    '<EventData><Data Name="ObjectType">File</Data></EventData></Event>'
+)
+
+_MALFORMED_XML = "<Event><System>"
+
+
+def _valid_4663(name: str, when: str) -> str:
+    return _VALID_4663.format(when=when, name=name)
+
+
+@pytest.mark.unit
+def test_malformed_record_is_skipped_and_reported_when_collecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        _valid_4663(r"E:\a.txt", "2026-03-01T09:00:05.0000000Z"),
+        _MALFORMED_4663_NO_OBJECT_NAME,
+        _valid_4663(r"E:\b.txt", "2026-03-01T09:00:09.0000000Z"),
+    ]
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx", lambda _: _SyntheticLog(records)
+    )
+
+    record_errors: list[dict[str, str]] = []
+    events = list(parse_evtx("evidence/logs/Security.evtx", record_errors=record_errors))
+
+    assert [event.file_path for event in events] == [r"E:\a.txt", r"E:\b.txt"]
+    assert len(record_errors) == 1
+    assert record_errors[0]["source_artifact"] == "evidence/logs/Security.evtx"
+    assert "Missing ObjectName" in record_errors[0]["message"]
+
+
+@pytest.mark.unit
+def test_malformed_xml_record_is_skipped_and_reported_when_collecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        _valid_4663(r"E:\a.txt", "2026-03-01T09:00:05.0000000Z"),
+        _MALFORMED_XML,
+        _valid_4663(r"E:\b.txt", "2026-03-01T09:00:09.0000000Z"),
+    ]
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx", lambda _: _SyntheticLog(records)
+    )
+
+    record_errors: list[dict[str, str]] = []
+    events = list(parse_evtx("evidence/logs/Security.evtx", record_errors=record_errors))
+
+    assert [event.file_path for event in events] == [r"E:\a.txt", r"E:\b.txt"]
+    assert len(record_errors) == 1
+    assert "Malformed XML" in record_errors[0]["message"]
+
+
+@pytest.mark.unit
+def test_malformed_record_still_raises_without_a_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [
+        _valid_4663(r"E:\a.txt", "2026-03-01T09:00:05.0000000Z"),
+        _MALFORMED_4663_NO_OBJECT_NAME,
+    ]
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx", lambda _: _SyntheticLog(records)
+    )
+
+    with pytest.raises(EvtxParseError, match="Missing ObjectName"):
+        list(parse_evtx("evidence/logs/Security.evtx"))
+
+
+@pytest.mark.unit
+def test_malformed_xml_record_still_raises_without_a_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [_valid_4663(r"E:\a.txt", "2026-03-01T09:00:05.0000000Z"), _MALFORMED_XML]
+    monkeypatch.setattr(
+        "exfiltrack.parsers.evtx_parser.evtx.Evtx", lambda _: _SyntheticLog(records)
+    )
+
+    with pytest.raises(EvtxParseError, match="Malformed XML"):
+        list(parse_evtx("evidence/logs/Security.evtx"))
