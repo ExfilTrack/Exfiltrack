@@ -206,7 +206,7 @@ def score_session(
                 e
                 for e in events
                 if isinstance(e.details.get("sha256"), str)
-                and e.details["sha256"].lower() in destination_file_hashes
+                and str(e.details["sha256"]).lower() in destination_file_hashes
             ),
             None,
         )
