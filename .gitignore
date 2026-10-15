@@ -66,6 +66,7 @@ desktop.ini
 /output/
 /reports/
 /cases-outputs/
+case_output-VM
 
 # Evidence file formats. Left unanchored on purpose: acquired evidence may be
 # placed in any local directory, and excluding it by extension everywhere is

@@ -239,10 +239,15 @@ def _reconstruct_device_sessions(
     """
     sessions: list[UsbSession] = []
     pending_start: SessionBoundary | None = None
+    last_closed_end_ts: datetime | None = None
 
     for event in ordered_events:
         if event.event_type in insert_types:
             if pending_start is not None:
+                if event.timestamp_utc == pending_start.timestamp_utc or (
+                    event.timestamp_utc - pending_start.timestamp_utc
+                ) <= timedelta(seconds=2):
+                    continue
                 sessions.append(
                     UsbSession(
                         session_id=_session_id(device_id, pending_start.timestamp_utc),
@@ -251,6 +256,7 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=False),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
             pending_start = SessionBoundary(event.timestamp_utc, observed=True, source_event=event)
 
         elif event.event_type in remove_types:
@@ -263,8 +269,13 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=True, source_event=event),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
                 pending_start = None
             else:
+                if last_closed_end_ts is not None and (
+                    event.timestamp_utc - last_closed_end_ts
+                ) <= timedelta(seconds=2):
+                    continue
                 inferred_start_ts = event.timestamp_utc - idle_gap
                 sessions.append(
                     UsbSession(
@@ -274,6 +285,7 @@ def _reconstruct_device_sessions(
                         end=SessionBoundary(event.timestamp_utc, observed=True, source_event=event),
                     )
                 )
+                last_closed_end_ts = event.timestamp_utc
 
     if pending_start is not None:
         inferred_end_ts = pending_start.timestamp_utc + idle_gap

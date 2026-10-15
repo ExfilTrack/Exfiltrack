@@ -201,3 +201,27 @@ def test_scoring_weights_reject_negative_values() -> None:
 
     with pytest.raises(ConfigError):
         ScoringWeights(activity_within_30s=-1)
+
+
+@pytest.mark.unit
+def test_repeated_file_events_for_same_path_score_only_once() -> None:
+    """Repeated audit logs for the same file (e.g. Security 4663) score only once."""
+    device = make_device()
+    insert_ts = utc(2026, 1, 1, 9, 0, 0)
+    # 5 events for the same file within 30s
+    events = [
+        make_insert_event(insert_ts, device),
+        make_remove_event(utc(2026, 1, 1, 9, 10, 0), device),
+    ] + [
+        make_file_event(insert_ts + timedelta(seconds=10 + i), r"C:\ClientData\dump.sql")
+        for i in range(5)
+    ]
+    session = reconstruct_sessions(events)[0]
+
+    scored = score_session(session, WEIGHTS)
+
+    assert scored.total_score == WEIGHTS.activity_within_30s + WEIGHTS.sensitive_extension
+    timing_contributions = [c for c in scored.contributions if c.rule == ACTIVITY_WITHIN_30S]
+    ext_contributions = [c for c in scored.contributions if c.rule == SENSITIVE_EXTENSION]
+    assert len(timing_contributions) == 1
+    assert len(ext_contributions) == 1
