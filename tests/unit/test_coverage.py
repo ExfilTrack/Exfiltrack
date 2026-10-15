@@ -375,3 +375,38 @@ def test_pipeline_records_coverage_in_all_outputs(
     html = result.report_paths["html"].read_text(encoding="utf-8")
     assert 'id="source-coverage"' in html
     assert "Evidence Coverage by Source" in html
+
+
+@pytest.mark.unit
+def test_record_scoped_parser_errors_do_not_lower_the_parsed_count(tmp_path: Path) -> None:
+    """A skipped *record* is not a failed *artifact* (report under-count fix).
+
+    The pipeline records per-record EVTX skips with ``scope: "record"``; the
+    log itself parsed and contributed its remaining events, so the source must
+    stay PRESENT and parsed, with no "failed to parse" note.
+    """
+    artifact = _artifact(tmp_path, "Security.evtx", ArtifactType.EVTX)
+    events = [
+        make_file_event(
+            utc(2026, 3, 1, 9, 0, 5), r"E:\a.sql", source_artifact=artifact.path.as_posix()
+        )
+    ]
+    errors = [
+        {
+            "source_artifact": artifact.path.as_posix(),
+            "artifact_type": "evtx",
+            "parser_name": "evtx_parser",
+            "parser_version": "1.2.0",
+            "error_type": "EvtxParseError",
+            "scope": "record",
+            "message": "Malformed record skipped: Missing ObjectName in Security 4663 event",
+        }
+    ]
+
+    coverage = build_coverage([artifact], events, parser_errors=errors)
+
+    row = _by_source(coverage)[EVTX_SECURITY]
+    assert row.status is SourceStatus.PRESENT
+    assert row.parsed == 1
+    assert row.event_count == 1
+    assert "failed to parse" not in row.note

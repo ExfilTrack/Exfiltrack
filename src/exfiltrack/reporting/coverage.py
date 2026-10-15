@@ -209,7 +209,9 @@ def build_coverage(
         events: The run's normalized events (any order).
         parser_errors: ``CaseManifest.parser_errors`` entries; a failed
             artifact lowers its source's ``parsed`` count but still counts as
-            supplied.
+            supplied. Entries with ``scope: "record"`` document individual
+            skipped records inside an otherwise parsed artifact and do not
+            lower the ``parsed`` count.
 
     Returns:
         An :class:`EvidenceCoverage` with the five expected sources in fixed
@@ -220,7 +222,10 @@ def build_coverage(
     event_counts: dict[str, int] = {}
     for event in events:
         event_counts[event.source_artifact] = event_counts.get(event.source_artifact, 0) + 1
-    failed = {error["source_artifact"] for error in parser_errors}
+    # Only artifact-level failures lower the parsed count. Entries scoped to
+    # a single record (the EVTX parser's per-record skips) mean the artifact
+    # itself parsed fine and contributed its remaining events.
+    failed = {error["source_artifact"] for error in parser_errors if error.get("scope") != "record"}
 
     supplied = dict.fromkeys(_SOURCE_ORDER, 0)
     parsed = dict.fromkeys(_SOURCE_ORDER, 0)

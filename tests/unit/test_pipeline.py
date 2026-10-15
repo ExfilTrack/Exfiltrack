@@ -23,6 +23,7 @@ from exfiltrack.pipeline import _DISPATCH, PipelineError, run_pipeline
 from tests.support.synthetic_evtx import (
     SyntheticEvtxReader,
     device_lifecycle_xml,
+    file_access_xml,
     placeholder_evtx_file,
 )
 
@@ -475,3 +476,97 @@ def test_without_window_the_manifest_has_no_window_field(
     payload = json.loads(result.report_paths["manifest"].read_text(encoding="utf-8"))
     assert "analysis_window" not in payload
     assert len(result.events) == 3
+
+
+# --- Per-record EVTX resilience (report under-count fix) ---------------------
+#
+# Regression: a single malformed record inside Security.evtx used to abort the
+# whole artifact, so every valid file-access event in the log vanished and the
+# report under-counted the files. In continue mode the log must now survive
+# the bad record (with the skip recorded in the manifest); strict mode keeps
+# the fail-fast contract.
+
+_MALFORMED_4663 = (
+    '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System>'
+    '<Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4663</EventID>'
+    '<TimeCreated SystemTime="2026-03-01T09:00:07.0000000Z"/></System>'
+    '<EventData><Data Name="ObjectType">File</Data></EventData></Event>'
+)
+
+
+def _malformed_record_scenario(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> CaseConfig:
+    """One session plus two valid 4663s around a malformed one."""
+    evidence_dir = tmp_path / "evidence"
+    system_log = evidence_dir / "logs" / "System.evtx"
+    security_log = evidence_dir / "logs" / "Security.evtx"
+    placeholder_evtx_file(system_log)
+    placeholder_evtx_file(security_log)
+    records = {
+        system_log.resolve().as_posix(): [
+            device_lifecycle_xml(
+                event_id="2003",
+                device_instance_id=r"USB\VID_1234&PID_5678\SERIAL001",
+                when=WHEN,
+                record_id=1,
+            ),
+            device_lifecycle_xml(
+                event_id="2102",
+                device_instance_id=r"USB\VID_1234&PID_5678\SERIAL001",
+                when=WHEN + timedelta(minutes=10),
+                record_id=2,
+            ),
+        ],
+        security_log.resolve().as_posix(): [
+            file_access_xml(
+                object_name=r"E:\Confidential\a.sql",
+                when=WHEN + timedelta(seconds=5),
+                record_id=10,
+            ),
+            _MALFORMED_4663,
+            file_access_xml(
+                object_name=r"E:\Confidential\b.sql",
+                when=WHEN + timedelta(seconds=20),
+                record_id=12,
+            ),
+        ],
+    }
+    monkeypatch.setattr("exfiltrack.parsers.evtx_parser.evtx.Evtx", SyntheticEvtxReader(records))
+    return CaseConfig(
+        evidence_dir=evidence_dir,
+        case_output_dir=tmp_path / "case",
+        case_id="CASE-BADRECORD",
+        examiner="J. Doe",
+    )
+
+
+@pytest.mark.unit
+def test_continue_mode_keeps_valid_evtx_records_around_a_malformed_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _malformed_record_scenario(monkeypatch, tmp_path)
+
+    result = run_pipeline(config, continue_on_parser_error=True, write_reports=False)
+
+    [session] = result.sessions
+    assert [Path(e.file_path).name for e in session.file_events] == ["a.sql", "b.sql"]
+    record_errors = [
+        error for error in result.manifest.parser_errors if error.get("scope") == "record"
+    ]
+    assert len(record_errors) == 1
+    assert "Security.evtx" in record_errors[0]["source_artifact"]
+    assert "Missing ObjectName" in record_errors[0]["message"]
+    # A skipped record is not an artifact failure: the log still counts as parsed.
+    assert result.coverage is not None
+    security = next(s for s in result.coverage.sources if s.source == "evtx/Security")
+    assert security.parsed == 1
+    assert security.event_count == 2
+
+
+@pytest.mark.unit
+def test_strict_mode_still_fails_on_a_malformed_evtx_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _malformed_record_scenario(monkeypatch, tmp_path)
+
+    with pytest.raises(EvtxParseError, match="Missing ObjectName"):
+        run_pipeline(config, write_reports=False)

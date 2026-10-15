@@ -48,7 +48,7 @@ from exfiltrack.normalization.device_identity import (
     prefer_event_log_boundaries,
     resolve_device_identities,
 )
-from exfiltrack.normalization.event_model import NormalizedEvent, sort_events
+from exfiltrack.normalization.event_model import EventType, NormalizedEvent, sort_events
 from exfiltrack.parsers import evtx_parser, jumplist_parser, lnk_parser, registry_parser
 from exfiltrack.reporting.coverage import EvidenceCoverage, build_coverage
 from exfiltrack.reporting.csv_report import write_coverage_csv, write_csv_reports
@@ -172,6 +172,10 @@ class PipelineResult:
         events: The full normalized timeline, deterministically sorted.
         sessions: Reconstructed USB sessions.
         findings: Scored, confidence-evaluated findings, one per session.
+        unattached_file_events: File-access events whose timestamp falls
+            outside every reconstructed session window (e.g. a write flushed
+            just after the removal event). They are disclosed in the reports
+            under "outside sessions" but are never attributed or scored.
         report_paths: Absolute paths written, keyed by
             ``"manifest"``, ``"json"``, ``"findings_csv"``, ``"timeline_csv"``,
             ``"coverage_csv"``, and ``"html"``. Empty when the run was invoked
@@ -188,6 +192,7 @@ class PipelineResult:
     findings: tuple[Finding, ...]
     report_paths: dict[str, Path] = field(default_factory=dict)
     coverage: EvidenceCoverage | None = None
+    unattached_file_events: tuple[NormalizedEvent, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +298,9 @@ def run_pipeline(
             the remaining artifacts. It contributes no events at all (partial
             output from a failing parser is discarded). When ``False`` (the
             default, used for manual analysis) the error propagates.
+            Additionally, when ``True``, individual malformed records inside an
+            otherwise readable EVTX log are skipped and recorded in the
+            manifest (``scope: "record"``) instead of aborting the whole log.
         progress: Optional :data:`ProgressCallback` invoked at every stage
             boundary and once per artifact during parsing (the dominant
             stage), so front ends can show a real percentage (issue #65).
@@ -366,9 +374,37 @@ def run_pipeline(
             continue
         parser_records.setdefault(key, ParserRecord(name=key[0], version=key[1]))
         try:
-            # Fully consumed before extending, so a parser that fails midway
-            # contributes nothing rather than a misleading partial timeline.
-            artifact_events = [_sanitize_event(ev) for ev in parse(artifact.path)]
+            if artifact.artifact_type is ArtifactType.EVTX and continue_on_parser_error:
+                # Record-level resilience: a single malformed record (a 4663
+                # with a missing field, a corrupted XML fragment) must not
+                # discard the rest of the log -- real Security.evtx files
+                # routinely contain such records, and dropping the whole log
+                # under-reports file activity. Every skipped record is
+                # appended to the manifest below; nothing is silently lost.
+                record_errors: list[dict[str, str]] = []
+                artifact_events = [
+                    _sanitize_event(ev)
+                    for ev in evtx_parser.parse_evtx(artifact.path, record_errors=record_errors)
+                ]
+                for record_error in record_errors:
+                    manifest.parser_errors.append(
+                        {
+                            "source_artifact": artifact.path.as_posix(),
+                            "artifact_type": artifact.artifact_type.value,
+                            "parser_name": key[0],
+                            "parser_version": key[1],
+                            "error_type": "EvtxParseError",
+                            # "record" scope: the artifact parsed; individual
+                            # records were skipped. Coverage must not count
+                            # the artifact as failed.
+                            "scope": "record",
+                            "message": record_error["message"],
+                        }
+                    )
+            else:
+                # Fully consumed before extending, so a parser that fails midway
+                # contributes nothing rather than a misleading partial timeline.
+                artifact_events = [_sanitize_event(ev) for ev in parse(artifact.path)]
         except ExfilTrackError as exc:
             if not continue_on_parser_error:
                 raise
@@ -452,6 +488,28 @@ def run_pipeline(
         destination_file_hashes=destination_file_hashes,
     )
 
+    # A recorded file access whose timestamp lands outside every session
+    # window (e.g. a write flushed just after the removal event) is not
+    # attached to any session, so it would otherwise vanish from the findings
+    # and the report would under-count the recorded file activity. Disclose
+    # these events separately; they are never attributed to a session or
+    # scored, because the correlation window is what the evidence shows.
+    unattached_file_events = [
+        event
+        for event in timeline
+        if event.event_type == EventType.FILE_ACCESS.value
+        and not any(
+            session.start.timestamp_utc <= event.timestamp_utc <= session.end.timestamp_utc
+            for session in sessions
+        )
+    ]
+    if unattached_file_events:
+        print(
+            f"Note: {len(unattached_file_events)} file-access event(s) fall outside "
+            "every reconstructed session window; they are listed in the reports "
+            "under 'outside sessions' but are not attributed or scored."
+        )
+
     print("Re-hashing evidence to verify integrity (post-analysis)...")
     report("Verifying evidence integrity", 0.85)
     manifest.post_analysis_digests = [
@@ -471,8 +529,15 @@ def run_pipeline(
         report("Writing reports", 0.90)
         output_dir = config.resolved_case_output_dir
         report_paths["manifest"] = write_manifest(manifest, output_dir)
-        report_paths["json"] = write_json_report(list(findings), manifest, output_dir)
-        findings_csv, timeline_csv = write_csv_reports(list(findings), output_dir)
+        report_paths["json"] = write_json_report(
+            list(findings),
+            manifest,
+            output_dir,
+            unattached_file_events=unattached_file_events,
+        )
+        findings_csv, timeline_csv = write_csv_reports(
+            list(findings), output_dir, unattached_file_events=unattached_file_events
+        )
         report_paths["findings_csv"] = findings_csv
         report_paths["timeline_csv"] = timeline_csv
         report_paths["coverage_csv"] = write_coverage_csv(coverage, output_dir)
@@ -482,6 +547,7 @@ def run_pipeline(
             limitations_text if limitations_text is not None else _default_limitations_text(),
             output_dir,
             generated_at=generated_at,
+            unattached_file_events=unattached_file_events,
         )
         print(f"Reports successfully written to: {output_dir}")
 
@@ -494,4 +560,5 @@ def run_pipeline(
         findings=tuple(findings),
         report_paths=report_paths,
         coverage=coverage,
+        unattached_file_events=tuple(unattached_file_events),
     )
