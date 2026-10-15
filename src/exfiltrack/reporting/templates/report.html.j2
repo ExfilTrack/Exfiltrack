@@ -54,6 +54,7 @@
       {% if manifest.coverage is defined and manifest.coverage is not none %}<a href="#source-coverage">Source Coverage</a>{% endif %}
       {% if manifest.parser_errors is defined and manifest.parser_errors %}<a href="#analysis-coverage">Analysis Coverage</a>{% endif %}
       <a href="#findings">Findings</a>
+      {% if unattached_file_events %}<a href="#unattached-file-activity">Outside-session File Activity</a>{% endif %}
       <a href="#chain-of-custody">Chain of Custody</a>
       <a href="#limitations">Limitations</a>
     </nav>
@@ -405,6 +406,20 @@
         {% endfor %}
       {% endif %}
     </section>
+
+    {% if unattached_file_events %}
+    <section id="unattached-file-activity">
+      <h2>File Activity Outside Reconstructed Sessions</h2>
+      <p class="event-count">
+        {{ unattached_file_events | length }} file-access event(s) were recorded in the
+        evidence but fall outside every reconstructed USB session window, so they cannot be
+        attributed to a specific connection and do not affect any score. They are disclosed
+        here so the record of file activity stays complete; possible causes include a write
+        completed just after the removal event, or a gap in the session-boundary evidence.
+      </p>
+      {{ file_event_table(unattached_file_events) }}
+    </section>
+    {% endif %}
 
     <section id="chain-of-custody">
       <h2>Chain of Custody</h2>

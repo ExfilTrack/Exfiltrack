@@ -485,20 +485,29 @@ class ExfilTrackApp:
             f"artifacts: {summary.artifacts}, events: {summary.events}, "
             f"sessions: {summary.sessions}, findings: {len(summary.findings)}"
             + (f" ({counts})" if counts else "")
+            + (
+                f", file events outside sessions: {summary.unattached_file_events}"
+                if summary.unattached_file_events
+                else ""
+            )
         )
         self.integrity_var.set(f"Evidence integrity: {summary.integrity_verdict}")
         self.verdict_var.set(controller.detection_statement(summary))
         if summary.parser_errors:
+            # Entries may be artifact-level (a file that failed entirely) or
+            # record-level (individual malformed EVTX records skipped inside
+            # an otherwise parsed log); the per-line details make the scope
+            # explicit either way.
             self._append_log(
-                f"WARNING: {len(summary.parser_errors)} artifact(s) could not be parsed; "
-                "results are PARTIAL."
+                f"WARNING: {len(summary.parser_errors)} parsing problem(s) recorded "
+                "(skipped artifacts or records); results may be PARTIAL."
             )
             for line in summary.parser_errors:
                 self._append_log(f"  parser error: {line}")
             messagebox.showwarning(
                 "Partial analysis",
-                f"{len(summary.parser_errors)} artifact(s) could not be parsed. "
-                "See the log pane for details.",
+                f"{len(summary.parser_errors)} parsing problem(s) recorded (skipped "
+                "artifacts or individual records). See the log pane for details.",
                 parent=self.root,
             )
         self._append_log("Reports written:")

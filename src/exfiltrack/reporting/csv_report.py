@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Iterable
 from pathlib import Path
 
 from exfiltrack.config import ExfilTrackError
+from exfiltrack.normalization.event_model import NormalizedEvent
 from exfiltrack.reporting.coverage import EvidenceCoverage
 from exfiltrack.reporting.model import Finding
 
@@ -114,25 +116,33 @@ def _render_csv(columns: tuple[str, ...], rows: list[dict[str, str]]) -> str:
     return buffer.getvalue()
 
 
-def _timeline_rows(findings: list[Finding]) -> list[dict[str, str]]:
+def _timeline_row(session_id: str, event: NormalizedEvent) -> dict[str, str]:
+    return {
+        "session_id": session_id,
+        "timestamp_utc": event.timestamp_utc.isoformat(),
+        "event_type": event.event_type,
+        "file_path": event.file_path or "",
+        "file_size_bytes": ("" if event.file_size_bytes is None else str(event.file_size_bytes)),
+        "source_artifact": event.source_artifact,
+        "parser_name": event.parser_name,
+        "parser_version": event.parser_version,
+    }
+
+
+def _timeline_rows(
+    findings: list[Finding],
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for finding in findings:
         session = finding.session
         for event in session.file_events:
-            rows.append(
-                {
-                    "session_id": session.session_id,
-                    "timestamp_utc": event.timestamp_utc.isoformat(),
-                    "event_type": event.event_type,
-                    "file_path": event.file_path or "",
-                    "file_size_bytes": (
-                        "" if event.file_size_bytes is None else str(event.file_size_bytes)
-                    ),
-                    "source_artifact": event.source_artifact,
-                    "parser_name": event.parser_name,
-                    "parser_version": event.parser_version,
-                }
-            )
+            rows.append(_timeline_row(session.session_id, event))
+    # File accesses recorded outside every session window are disclosed with
+    # an empty session_id so the timeline never under-counts recorded file
+    # activity; they carry no session attribution or score.
+    for event in unattached_file_events:
+        rows.append(_timeline_row("", event))
     # Sorted explicitly so output stays deterministic even if a caller
     # passes findings/file_events in a non-canonical order.
     rows.sort(key=lambda r: (r["timestamp_utc"], r["session_id"], r["source_artifact"]))
@@ -150,14 +160,19 @@ def render_findings_csv(findings: list[Finding]) -> str:
     return _render_csv(FINDINGS_COLUMNS, _findings_rows(findings))
 
 
-def render_timeline_csv(findings: list[Finding]) -> str:
+def render_timeline_csv(
+    findings: list[Finding],
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> str:
     """Render the reconstructed timeline as a separate table.
 
-    One row per file-activity event across every session. Explicitly
-    sorted by timestamp so the sheet reads as a genuine timeline
-    regardless of session ordering.
+    One row per file-activity event across every session, plus one row per
+    recorded file access that fell outside every session window (empty
+    ``session_id``). Explicitly sorted by timestamp so the sheet reads as a
+    genuine timeline regardless of session ordering.
     """
-    return _render_csv(TIMELINE_COLUMNS, _timeline_rows(findings))
+    return _render_csv(TIMELINE_COLUMNS, _timeline_rows(findings, unattached_file_events))
 
 
 def write_findings_csv(findings: list[Finding], case_output_dir: Path) -> Path:
@@ -171,21 +186,36 @@ def write_findings_csv(findings: list[Finding], case_output_dir: Path) -> Path:
     return destination
 
 
-def write_timeline_csv(findings: list[Finding], case_output_dir: Path) -> Path:
+def write_timeline_csv(
+    findings: list[Finding],
+    case_output_dir: Path,
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> Path:
     """Write the timeline table into *case_output_dir* and return its path."""
     destination = case_output_dir.resolve() / TIMELINE_CSV_FILENAME
     try:
         case_output_dir.mkdir(parents=True, exist_ok=True)
-        destination.write_text(render_timeline_csv(findings), encoding="utf-8")
+        destination.write_text(
+            render_timeline_csv(findings, unattached_file_events=unattached_file_events),
+            encoding="utf-8",
+        )
     except OSError as exc:
         raise ReportError(f"Cannot write timeline CSV to '{destination}': {exc}") from exc
     return destination
 
 
-def write_csv_reports(findings: list[Finding], case_output_dir: Path) -> tuple[Path, Path]:
+def write_csv_reports(
+    findings: list[Finding],
+    case_output_dir: Path,
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> tuple[Path, Path]:
     """Write both CSV tables into *case_output_dir* and return their paths."""
     findings_path = write_findings_csv(findings, case_output_dir)
-    timeline_path = write_timeline_csv(findings, case_output_dir)
+    timeline_path = write_timeline_csv(
+        findings, case_output_dir, unattached_file_events=unattached_file_events
+    )
     return findings_path, timeline_path
 
 

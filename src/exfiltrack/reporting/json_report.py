@@ -11,6 +11,7 @@ JSON document for downstream tooling.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -109,33 +110,53 @@ def _finding_to_dict(finding: Finding) -> dict[str, Any]:
     }
 
 
-def build_json_report(findings: list[Finding], manifest: CaseManifest) -> dict[str, Any]:
+def build_json_report(
+    findings: list[Finding],
+    manifest: CaseManifest,
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> dict[str, Any]:
     """Assemble the full machine-readable finding set as a plain dict.
 
     Findings are expected to already be in a deterministic order (see
     :func:`exfiltrack.reporting.model.assemble_findings`); this function
     does not re-sort them, so callers control ordering explicitly.
+
+    ``unattached_file_events`` are recorded file accesses that fell outside
+    every reconstructed session window; they are disclosed under their own
+    top-level key so the report never under-counts recorded file activity,
+    and they are never attributed to a session or scored.
     """
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "manifest": manifest.to_dict(),
         "findings": [_finding_to_dict(f) for f in findings],
+        "unattached_file_events": [_event_to_dict(e) for e in unattached_file_events],
     }
 
 
-def render_json_report(findings: list[Finding], manifest: CaseManifest) -> str:
+def render_json_report(
+    findings: list[Finding],
+    manifest: CaseManifest,
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
+) -> str:
     """Serialise the report to a deterministic JSON string.
 
     ``sort_keys=True`` and a fixed indent make output byte-identical across
     runs on identical input (Definition of Done, #12); nothing here relies
     on Python dict insertion order.
     """
-    payload = build_json_report(findings, manifest)
+    payload = build_json_report(findings, manifest, unattached_file_events=unattached_file_events)
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 def write_json_report(
-    findings: list[Finding], manifest: CaseManifest, case_output_dir: Path
+    findings: list[Finding],
+    manifest: CaseManifest,
+    case_output_dir: Path,
+    *,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
 ) -> Path:
     """Render and write the JSON report into *case_output_dir*.
 
@@ -146,7 +167,7 @@ def write_json_report(
     Returns:
         The absolute path the report was written to.
     """
-    text = render_json_report(findings, manifest)
+    text = render_json_report(findings, manifest, unattached_file_events=unattached_file_events)
     destination = case_output_dir.resolve() / JSON_REPORT_FILENAME
     try:
         case_output_dir.mkdir(parents=True, exist_ok=True)

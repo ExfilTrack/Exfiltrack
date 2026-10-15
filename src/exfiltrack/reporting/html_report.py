@@ -24,6 +24,7 @@ from markupsafe import Markup
 from exfiltrack.config import ExfilTrackError
 from exfiltrack.correlation.scoring import ScoreContribution
 from exfiltrack.evidence.manifest import CaseManifest
+from exfiltrack.normalization.event_model import NormalizedEvent
 from exfiltrack.reporting.model import Finding
 
 # Keep the default resources beside this module so source checkouts and
@@ -214,6 +215,7 @@ def render_html_report(
     *,
     templates_dir: Path | None = None,
     generated_at: datetime | None = None,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
 ) -> str:
     """Render the investigator-facing HTML report as a string.
 
@@ -230,6 +232,10 @@ def render_html_report(
             the packaged ``exfiltrack.reporting/templates/`` resources.
         generated_at: Override for the report's generation timestamp.
             Defaults to now, in the manifest's timezone.
+        unattached_file_events: Recorded file accesses that fell outside
+            every reconstructed session window. Disclosed in their own
+            section so the report never under-counts recorded file activity;
+            they are never attributed to a session or scored.
 
     Returns:
         The complete HTML document as a string.
@@ -271,6 +277,7 @@ def render_html_report(
         generated_at=when,
         tool_name=manifest.tool_name,
         tool_version=manifest.tool_version,
+        unattached_file_events=list(unattached_file_events),
     )
     _assert_safe_wording(html)
     return html
@@ -305,6 +312,7 @@ def write_html_report(
     *,
     templates_dir: Path | None = None,
     generated_at: datetime | None = None,
+    unattached_file_events: Iterable[NormalizedEvent] = (),
 ) -> Path:
     """Render and write the HTML report into *case_output_dir*.
 
@@ -326,6 +334,7 @@ def write_html_report(
         limitations_text,
         templates_dir=templates_dir,
         generated_at=generated_at,
+        unattached_file_events=unattached_file_events,
     )
     destination = case_output_dir.resolve() / REPORT_FILENAME
     try:

@@ -103,6 +103,8 @@ class AnalysisSummary:
         output_dir: Directory the manifest and reports were written to.
         report_paths: ``(name, path)`` pairs for every written report.
         html_report: Path of the HTML report, if one was written.
+        unattached_file_events: Recorded file accesses that fell outside
+            every session window (disclosed in the reports, never scored).
     """
 
     case_id: str
@@ -117,6 +119,7 @@ class AnalysisSummary:
     output_dir: Path
     report_paths: tuple[tuple[str, Path], ...]
     html_report: Path | None
+    unattached_file_events: int = 0
 
 
 @dataclass(frozen=True)
@@ -380,6 +383,7 @@ def summarize_result(result: PipelineResult) -> AnalysisSummary:
         output_dir=output_dir,
         report_paths=report_paths,
         html_report=result.report_paths.get("html"),
+        unattached_file_events=len(result.unattached_file_events),
     )
 
 
